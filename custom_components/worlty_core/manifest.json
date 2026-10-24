@@ -1,0 +1,18 @@
+{
+  "domain": "worlty_core",
+  "name": "Worlty",
+  "codeowners": [
+    "@ranni-worlty"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/WorltyTeam/worlty-homeassistant",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/WorltyTeam/worlty-homeassistant/issues",
+  "requirements": [],
+  "version": "2.0.0",
+  "zeroconf": [
+    "_worlty._tcp.local.",
+    "_worlty-pair._tcp.local."
+  ]
+}

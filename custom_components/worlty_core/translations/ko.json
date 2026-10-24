@@ -1,0 +1,489 @@
+{
+  "title": "Worlty",
+  "config": {
+    "step": {
+      "retry": {
+        "title": "연결 다시 시도",
+        "description": "연결을 완료하지 못했습니다. 입력한 연결 정보로 다시 시도해 주세요."
+      },
+      "confirm_rebind": {
+        "title": "월티 허브의 보안 정보가 바뀌었습니다",
+        "description": "등록된 월티 허브의 보안 정보가 바뀌었습니다. **직접 변경한 내용이거나 안내받은 변경일 때만 계속하세요.** 예상하지 못한 변경이라면 취소해 주세요.\n\n- 허브 식별번호: `{device_id}`\n- 제품 고유번호: `{target_id}`\n- 이전 인증서 공개키 식별값: `{old_pin}`\n- 새 인증서 공개키 식별값: `{new_pin}`\n\n계속한 뒤 월티 앱에서도 연결 요청을 승인해야 새 정보가 적용됩니다.",
+        "data": {
+          "confirm": "예상한 보안 정보 변경임을 확인했습니다"
+        }
+      },
+      "approval": {
+        "title": "월티 허브 연결",
+        "description": "계속하면 월티 앱에 연결 요청을 보냅니다. 앱에서 승인하면 {name}에 연결된 기기를 Home Assistant에서도 확인하고 제어할 수 있습니다.",
+        "data": {
+          "host": "월티 허브 주소",
+          "port": "연결 포트",
+          "tls_hostname": "허브의 .local 주소",
+          "binding_generation": "연결 복구 번호"
+        },
+        "data_description": {
+          "host": "처음 연결할 때는 .local로 끝나는 허브 주소를 입력하세요. 예: worlty-123abc.local",
+          "port": "별도로 바꾸지 않았다면 기본값을 사용하세요.",
+          "tls_hostname": "IP 주소로 연결하는 경우에도 기기를 확인할 수 있도록 허브의 .local 주소를 함께 입력해 주세요.",
+          "binding_generation": "기존 연결을 복구할 때만 사용합니다. 별도로 안내받은 번호가 없다면 비워 두세요."
+        }
+      },
+      "user": {
+        "title": "Worlty 연결",
+        "description": "연결할 제품을 선택하세요.",
+        "menu_options": {
+          "approval": "월티 허브 연결",
+          "token": "클래식 패드 연결"
+        }
+      },
+      "token": {
+        "title": "클래식 패드 연결",
+        "description": "월티 앱에서 {name}의 액세스 토큰을 복사해 붙여 넣으세요.",
+        "data": {
+          "host": "클래식 패드 주소",
+          "port": "연결 포트",
+          "access_token": "액세스 토큰"
+        },
+        "data_description": {
+          "host": "월티 앱에서 확인한 기기 주소를 입력하세요.",
+          "port": "월티 앱에서 확인한 연결 포트를 입력하세요.",
+          "access_token": "월티 앱에서 복사한 액세스 토큰을 붙여 넣으세요."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "기기에 연결하지 못했습니다. 전원과 네트워크 연결, 입력한 주소를 확인한 뒤 다시 시도하세요.",
+      "pin_mismatch": "선택한 월티 허브의 연결 정보와 일치하지 않습니다. 월티 앱에서 같은 허브인지 확인한 뒤 다시 시도하세요.",
+      "pairing_required": "월티 앱에서 월티 허브의 Home Assistant 연결 등록을 열고 요청을 승인하세요.",
+      "authentication_failed": "기기의 연결 정보를 확인하지 못했습니다. 월티 앱에서 해당 기기의 연결 상태를 확인한 뒤 다시 시도해 주세요.",
+      "invalid_input": "입력한 값이 올바르지 않습니다. 표시된 안내에 맞게 다시 입력하세요.",
+      "confirmation_required": "계속하려면 보안 정보 변경을 확인해 주세요. 예상한 변경이 아니라면 취소하세요.",
+      "invalid_access_token": "클래식 패드의 액세스 토큰이 맞지 않습니다. 월티 앱에서 토큰을 다시 복사해 입력하세요.",
+      "identity_mismatch": "선택한 클래식 패드의 연결 정보와 일치하지 않습니다. 기기 주소를 확인하고 다시 시도하세요."
+    },
+    "abort": {
+      "already_configured": "이미 연결된 기기입니다. 설정 > 기기 및 서비스에서 Worlty를 확인하세요.",
+      "invalid_discovery": "기기의 연결 정보를 확인하지 못했습니다. 기기가 켜져 있는지 확인한 뒤 다시 검색하세요.",
+      "pin_mismatch": "등록된 월티 허브의 기기 정보와 일치하지 않습니다. 월티 앱에서 같은 허브인지 확인한 뒤 다시 시도하세요.",
+      "authentication_failed": "연결 설정을 확인하지 못했습니다. 월티 앱에서 기기를 확인한 뒤 다시 시도하세요.",
+      "cannot_connect": "기기에 연결하지 못했습니다. 전원과 네트워크 연결을 확인한 뒤 다시 시도하세요.",
+      "invalid_input": "연결 정보가 올바르지 않습니다. 입력한 값을 확인하고 다시 시도하세요.",
+      "reauth_successful": "연결 정보를 확인했습니다. 다시 사용할 수 있습니다.",
+      "registration_not_open": "월티 앱에서 월티 허브의 Home Assistant 연결 등록을 연 뒤 다시 시도하세요."
+    },
+    "progress": {
+      "registration": "월티 앱에서 Home Assistant 연결 요청을 승인해 주세요. 승인되면 자동으로 연결합니다."
+    },
+    "flow_title": "{name}"
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "클래식 패드 설정",
+        "description": "Home Assistant에 표시할 항목을 선택하세요.\n\n- **기본**: 기기 제어, 센서, 루틴·타이머·자동 켜기/끄기 스위치\n- **고급**: 기본 항목에 시간·온도·보정값 등의 상세 설정 추가\n\n자동화에서 상세 설정을 사용하고 있다면 고급을 선택해 주세요.\n필터 잔여 시간과 타이머 숫자 설정은 월티 앱에서 변경할 수 있습니다.",
+        "data": {
+          "v1_mode": "표시 모드"
+        }
+      }
+    },
+    "error": {
+      "invalid_mode": "표시 모드를 기본 또는 고급으로 선택해 주세요."
+    },
+    "abort": {
+      "export_not_enabled": "이 화면에서 변경할 월티 허브 설정은 없습니다. 연결 설정은 월티 앱에서 확인해 주세요."
+    }
+  },
+  "selector": {
+    "v1_mode": {
+      "options": {
+        "basic": "기본",
+        "advanced": "고급"
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "battery": {
+        "name": "배터리 부족 {sub_id}"
+      },
+      "battery_charging": {
+        "name": "배터리 충전 {sub_id}"
+      },
+      "binary_sensor": {
+        "name": "상태 {sub_id}"
+      },
+      "co": {
+        "name": "일산화탄소 감지 {sub_id}"
+      },
+      "cold": {
+        "name": "저온 감지 {sub_id}"
+      },
+      "connectivity": {
+        "name": "연결 상태 {sub_id}"
+      },
+      "door": {
+        "name": "문 {sub_id}"
+      },
+      "error": {
+        "name": "오류 {sub_id}"
+      },
+      "filter": {
+        "name": "필터 교체 {sub_id}"
+      },
+      "fire": {
+        "name": "화재 감지 {sub_id}"
+      },
+      "garage_door": {
+        "name": "차고 {sub_id}"
+      },
+      "gas": {
+        "name": "가스 감지 {sub_id}"
+      },
+      "guard": {
+        "name": "방범 {sub_id}"
+      },
+      "heat": {
+        "name": "고온 감지 {sub_id}"
+      },
+      "light": {
+        "name": "빛 감지 {sub_id}"
+      },
+      "lock": {
+        "name": "잠금 {sub_id}"
+      },
+      "moisture": {
+        "name": "물 감지 {sub_id}"
+      },
+      "motion": {
+        "name": "움직임 감지 {sub_id}"
+      },
+      "moving": {
+        "name": "이동 상태 {sub_id}"
+      },
+      "occupancy": {
+        "name": "재실 {sub_id}"
+      },
+      "opening": {
+        "name": "열림 감지 {sub_id}"
+      },
+      "plug": {
+        "name": "플러그 연결 {sub_id}"
+      },
+      "power": {
+        "name": "전원 {sub_id}"
+      },
+      "presence": {
+        "name": "재실 감지 {sub_id}"
+      },
+      "problem": {
+        "name": "이상 감지 {sub_id}"
+      },
+      "running": {
+        "name": "작동 상태 {sub_id}"
+      },
+      "safety": {
+        "name": "안전 상태 {sub_id}"
+      },
+      "smoke": {
+        "name": "연기 감지 {sub_id}"
+      },
+      "sound": {
+        "name": "소리 감지 {sub_id}"
+      },
+      "tamper": {
+        "name": "훼손 감지 {sub_id}"
+      },
+      "update": {
+        "name": "업데이트 {sub_id}"
+      },
+      "vibration": {
+        "name": "진동 감지 {sub_id}"
+      },
+      "window": {
+        "name": "창문 {sub_id}"
+      }
+    },
+    "climate": {
+      "ac": {
+        "name": "에어컨 {sub_id}",
+        "state_attributes": {
+          "fan_mode": {
+            "state": {
+              "natural": "자연풍",
+              "turbo": "터보",
+              "weak": "미풍"
+            }
+          }
+        }
+      }
+    },
+    "fan": {
+      "airone": {
+        "name": "에어원 {sub_id}"
+      },
+      "fan": {
+        "name": "환기 {sub_id}"
+      },
+      "sysclein": {
+        "name": "시스클라인 {sub_id}"
+      }
+    },
+    "light": {
+      "dimming": {
+        "name": "밝기 조절 조명 {sub_id}"
+      },
+      "light": {
+        "name": "조명 {sub_id}"
+      }
+    },
+    "sensor": {
+      "apparent_power": {
+        "name": "피상 전력 {sub_id}"
+      },
+      "aqi": {
+        "name": "공기질 지수 {sub_id}"
+      },
+      "atmospheric_pressure": {
+        "name": "대기압 {sub_id}"
+      },
+      "battery": {
+        "name": "배터리 {sub_id}"
+      },
+      "carbon_dioxide": {
+        "name": "이산화탄소 {sub_id}"
+      },
+      "carbon_monoxide": {
+        "name": "일산화탄소 {sub_id}"
+      },
+      "current": {
+        "name": "전류 {sub_id}"
+      },
+      "data_rate": {
+        "name": "데이터 속도 {sub_id}"
+      },
+      "data_size": {
+        "name": "데이터 크기 {sub_id}"
+      },
+      "date": {
+        "name": "날짜 {sub_id}"
+      },
+      "distance": {
+        "name": "거리 {sub_id}"
+      },
+      "duration": {
+        "name": "지속 시간 {sub_id}"
+      },
+      "energy": {
+        "name": "에너지 {sub_id}"
+      },
+      "enum": {
+        "name": "상태 {sub_id}"
+      },
+      "event": {
+        "name": "이벤트 {sub_id}"
+      },
+      "event_uss": {
+        "name": "USS 이벤트 {sub_id}"
+      },
+      "floor": {
+        "name": "층 {sub_id}"
+      },
+      "frequency": {
+        "name": "주파수 {sub_id}"
+      },
+      "gas": {
+        "name": "가스 {sub_id}"
+      },
+      "heat": {
+        "name": "난방 {sub_id}"
+      },
+      "hotwater": {
+        "name": "온수 {sub_id}"
+      },
+      "humidity": {
+        "name": "습도 {sub_id}"
+      },
+      "illuminance": {
+        "name": "조도 {sub_id}"
+      },
+      "irradiance": {
+        "name": "복사 조도 {sub_id}"
+      },
+      "moisture": {
+        "name": "수분 {sub_id}"
+      },
+      "monetary": {
+        "name": "금액 {sub_id}"
+      },
+      "multisensor": {
+        "name": "다중 센서 {sub_id}"
+      },
+      "nitrogen_dioxide": {
+        "name": "이산화질소 {sub_id}"
+      },
+      "nitrogen_monoxide": {
+        "name": "일산화질소 {sub_id}"
+      },
+      "nitrous_oxide": {
+        "name": "아산화질소 {sub_id}"
+      },
+      "ozone": {
+        "name": "오존 {sub_id}"
+      },
+      "percentage": {
+        "name": "백분율 {sub_id}"
+      },
+      "pm1": {
+        "name": "PM1 {sub_id}"
+      },
+      "pm10": {
+        "name": "PM10 {sub_id}"
+      },
+      "pm25": {
+        "name": "PM2.5 {sub_id}"
+      },
+      "power": {
+        "name": "전력 {sub_id}"
+      },
+      "power_factor": {
+        "name": "역률 {sub_id}"
+      },
+      "precipitation": {
+        "name": "강수량 {sub_id}"
+      },
+      "precipitation_intensity": {
+        "name": "강수 강도 {sub_id}"
+      },
+      "pressure": {
+        "name": "압력 {sub_id}"
+      },
+      "reactive_power": {
+        "name": "무효 전력 {sub_id}"
+      },
+      "sensor": {
+        "name": "센서 {sub_id}"
+      },
+      "signal_strength": {
+        "name": "신호 강도 {sub_id}"
+      },
+      "sound_pressure": {
+        "name": "음압 {sub_id}"
+      },
+      "speed": {
+        "name": "속도 {sub_id}"
+      },
+      "string": {
+        "name": "텍스트 {sub_id}"
+      },
+      "sulphur_dioxide": {
+        "name": "이산화황 {sub_id}"
+      },
+      "temperature": {
+        "name": "온도 {sub_id}"
+      },
+      "timestamp": {
+        "name": "시각 {sub_id}"
+      },
+      "volatile_organic_compounds": {
+        "name": "휘발성 유기 화합물 {sub_id}"
+      },
+      "voltage": {
+        "name": "전압 {sub_id}"
+      },
+      "volume": {
+        "name": "부피 {sub_id}"
+      },
+      "water": {
+        "name": "물 {sub_id}"
+      },
+      "weather": {
+        "name": "날씨 {sub_id}"
+      },
+      "weight": {
+        "name": "무게 {sub_id}"
+      },
+      "wind_speed": {
+        "name": "풍속 {sub_id}"
+      },
+      "worlty_run_ms": {
+        "name": "월티 제어 작동 시간 {sub_id}"
+      },
+      "last_execute": {
+        "name": "타이머 최근 실행 시각 {sub_id}"
+      }
+    },
+    "switch": {
+      "cook": {
+        "name": "가스밸브 {sub_id}"
+      },
+      "elevator": {
+        "name": "엘리베이터 호출 {sub_id}"
+      },
+      "interphone": {
+        "name": "인터폰 {sub_id}"
+      },
+      "lock": {
+        "name": "잠금 {sub_id}"
+      },
+      "open": {
+        "name": "열기 {sub_id}"
+      },
+      "outlet": {
+        "name": "콘센트 {sub_id}"
+      },
+      "switch": {
+        "name": "스위치 {sub_id}"
+      },
+      "valve": {
+        "name": "밸브 {sub_id}"
+      },
+      "timer": {
+        "name": "타이머 {sub_id}"
+      },
+      "worlty": {
+        "name": "월티 제어 {sub_id}"
+      }
+    },
+    "number": {
+      "number": {
+        "name": "{sub_id}"
+      }
+    },
+    "time": {
+      "time": {
+        "name": "{sub_id}"
+      }
+    },
+    "date": {
+      "date": {
+        "name": "{sub_id}"
+      }
+    },
+    "water_heater": {
+      "boiler": {
+        "name": "보일러 {sub_id}"
+      }
+    }
+  },
+  "exceptions": {
+    "classic_authentication_failed": {
+      "message": "클래식 패드의 연결 정보를 확인하지 못했습니다. 기기 주소와 액세스 토큰을 확인해 주세요."
+    },
+    "classic_connection_failed": {
+      "message": "클래식 패드에 연결하지 못했습니다. 전원과 네트워크 연결, 주소와 포트를 확인해 주세요."
+    },
+    "hub_authentication_failed": {
+      "message": "월티 허브의 연결 정보를 확인하지 못했습니다. 월티 앱에서 연결하려는 허브가 맞는지 확인해 주세요."
+    },
+    "hub_connection_failed": {
+      "message": "월티 허브에 연결하지 못했습니다. 전원과 네트워크 연결을 확인해 주세요. 문제가 계속되면 진단 정보를 내려받아 문의해 주세요."
+    },
+    "classic_connection_closing": {
+      "message": "클래식 패드와의 연결을 종료하고 있습니다. 잠시 후 연결 상태를 확인하고 다시 시도해 주세요."
+    },
+    "classic_preset_mode_unknown": {
+      "message": "복귀할 냉난방 모드를 확인할 수 없습니다. 프리셋을 해제하려면 냉난방 모드를 먼저 선택해 주세요."
+    }
+  }
+}

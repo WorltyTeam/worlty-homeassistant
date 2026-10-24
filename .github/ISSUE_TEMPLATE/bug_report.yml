@@ -1,0 +1,57 @@
+name: 문제 제보
+description: 연결이나 기능이 기대한 대로 동작하지 않을 때 알려 주세요.
+title: "[문제] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        로그나 진단 파일을 올릴 때는 액세스 토큰·개인 키 등 인증 정보와 기기 고유번호·주소 등 개인정보를 지워 주세요.
+  - type: dropdown
+    id: product
+    attributes:
+      label: 사용 중인 제품
+      options:
+        - 클래식 패드
+        - 월티 허브
+        - 두 제품 모두
+        - 제품과 관계없는 문제
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant 버전
+      placeholder: "예: 2026.9.2"
+    validations:
+      required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: Worlty 통합구성요소 버전
+      description: 설정의 Worlty 통합구성요소 화면에서 확인할 수 있습니다.
+    validations:
+      required: true
+  - type: input
+    id: firmware_version
+    attributes:
+      label: 기기 펌웨어 버전
+      description: 확인할 수 있다면 적어 주세요.
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: 어떤 문제가 생겼나요?
+      description: 기대한 동작과 실제 동작을 함께 적어 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 문제를 다시 확인하는 방법
+      description: 문제 직전에 한 작업이나 반복되는 조건을 적어 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 로그와 진단 정보
+      description: 관련 로그·진단 파일·화면이 있다면 첨부해 주세요. 인증 정보와 개인정보는 제외해 주세요.

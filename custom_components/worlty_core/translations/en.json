@@ -1,0 +1,489 @@
+{
+  "title": "Worlty",
+  "config": {
+    "step": {
+      "retry": {
+        "title": "Retry connection",
+        "description": "Setup could not be completed. Try again with the connection details you entered."
+      },
+      "confirm_rebind": {
+        "title": "Worlty Hub security information has changed",
+        "description": "The security information for your registered Worlty Hub has changed. **Continue only if you made this change or were told to expect it.** Cancel if the change is unexpected.\n\n- Hub identifier: `{device_id}`\n- Product identifier: `{target_id}`\n- Previous public key fingerprint: `{old_pin}`\n- New public key fingerprint: `{new_pin}`\n\nAfter continuing, approve the connection request in the Worlty app to apply the new information.",
+        "data": {
+          "confirm": "I confirm this is an expected security change"
+        }
+      },
+      "approval": {
+        "title": "Connect Worlty Hub",
+        "description": "Continue to send a connection request to the Worlty app. Once you approve it, you can view and control the devices connected to {name} in Home Assistant.",
+        "data": {
+          "host": "Worlty Hub address",
+          "port": "Connection port",
+          "tls_hostname": "Hub .local address",
+          "binding_generation": "Connection recovery number"
+        },
+        "data_description": {
+          "host": "Use an address ending in .local for a new connection, such as worlty-123abc.local.",
+          "port": "Keep the default unless you have changed it.",
+          "tls_hostname": "Enter the hub’s .local address for device verification, even when connecting by IP address.",
+          "binding_generation": "Used only to recover an existing connection. Leave this blank unless you have been given a recovery number."
+        }
+      },
+      "user": {
+        "title": "Connect Worlty",
+        "description": "Choose the product you want to connect.",
+        "menu_options": {
+          "approval": "Connect Worlty Hub",
+          "token": "Connect Classic Pad"
+        }
+      },
+      "token": {
+        "title": "Connect Classic Pad",
+        "description": "Copy the access token for {name} from the Worlty app and paste it here.",
+        "data": {
+          "host": "Classic Pad address",
+          "port": "Connection port",
+          "access_token": "Access token"
+        },
+        "data_description": {
+          "host": "Enter the device address shown in the Worlty app.",
+          "port": "Enter the connection port shown in the Worlty app.",
+          "access_token": "Paste the access token you copied from the Worlty app."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect. Check the device power, network connection and address, then try again.",
+      "pin_mismatch": "The connection details do not match the selected Worlty Hub. Check that it is the same hub in the Worlty app before trying again.",
+      "pairing_required": "In the Worlty app, open Home Assistant registration for this hub and approve the connection request.",
+      "authentication_failed": "Could not verify the connection. Check the device connection in the Worlty app, then try again.",
+      "invalid_input": "One or more values are invalid. Follow the field guidance and try again.",
+      "confirmation_required": "Confirm the security change to continue. Cancel if you did not expect it.",
+      "invalid_access_token": "The Classic Pad access token is incorrect. Copy the token again from the Worlty app.",
+      "identity_mismatch": "The connection details do not match the selected Classic Pad. Check its address and try again."
+    },
+    "abort": {
+      "already_configured": "This device is already connected. Find Worlty under Settings > Devices & services.",
+      "invalid_discovery": "Could not read the device connection details. Check that it is powered on and search again.",
+      "pin_mismatch": "The device details do not match the registered Worlty Hub. Check that it is the same hub in the Worlty app before trying again.",
+      "authentication_failed": "Could not verify the connection settings. Check the device in the Worlty app, then try again.",
+      "cannot_connect": "Could not connect. Check the device power and network connection, then try again.",
+      "invalid_input": "The connection details are invalid. Check the entered values and try again.",
+      "reauth_successful": "The connection details have been verified. You can use the device again.",
+      "registration_not_open": "In the Worlty app, open Home Assistant registration for this hub, then try again."
+    },
+    "progress": {
+      "registration": "Approve the Home Assistant connection request in the Worlty app. Setup will finish automatically after approval."
+    },
+    "flow_title": "{name}"
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Classic Pad settings",
+        "description": "Choose which items to show in Home Assistant.\n\n- **Basic**: device controls, sensors, and switches for routines, timers, and automatic on/off\n- **Advanced**: everything in Basic, plus settings for time, temperature, calibration, and more\n\nChoose Advanced if your automations use these settings.\nUse the Worlty app to change the remaining filter time and numeric timer settings.",
+        "data": {
+          "v1_mode": "Display mode"
+        }
+      }
+    },
+    "error": {
+      "invalid_mode": "Choose Basic or Advanced as the display mode."
+    },
+    "abort": {
+      "export_not_enabled": "There are no Worlty Hub settings to change here. Check the connection settings in the Worlty app."
+    }
+  },
+  "selector": {
+    "v1_mode": {
+      "options": {
+        "basic": "Basic",
+        "advanced": "Advanced"
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "battery": {
+        "name": "Low battery {sub_id}"
+      },
+      "battery_charging": {
+        "name": "Battery charging {sub_id}"
+      },
+      "binary_sensor": {
+        "name": "Status {sub_id}"
+      },
+      "co": {
+        "name": "Carbon monoxide {sub_id}"
+      },
+      "cold": {
+        "name": "Cold {sub_id}"
+      },
+      "connectivity": {
+        "name": "Connection {sub_id}"
+      },
+      "door": {
+        "name": "Door {sub_id}"
+      },
+      "error": {
+        "name": "Error {sub_id}"
+      },
+      "filter": {
+        "name": "Filter replacement {sub_id}"
+      },
+      "fire": {
+        "name": "Fire {sub_id}"
+      },
+      "garage_door": {
+        "name": "Garage door {sub_id}"
+      },
+      "gas": {
+        "name": "Gas {sub_id}"
+      },
+      "guard": {
+        "name": "Security {sub_id}"
+      },
+      "heat": {
+        "name": "Heat {sub_id}"
+      },
+      "light": {
+        "name": "Light {sub_id}"
+      },
+      "lock": {
+        "name": "Lock {sub_id}"
+      },
+      "moisture": {
+        "name": "Moisture {sub_id}"
+      },
+      "motion": {
+        "name": "Motion {sub_id}"
+      },
+      "moving": {
+        "name": "Movement {sub_id}"
+      },
+      "occupancy": {
+        "name": "Occupancy {sub_id}"
+      },
+      "opening": {
+        "name": "Opening {sub_id}"
+      },
+      "plug": {
+        "name": "Plug connection {sub_id}"
+      },
+      "power": {
+        "name": "Power {sub_id}"
+      },
+      "presence": {
+        "name": "Presence {sub_id}"
+      },
+      "problem": {
+        "name": "Problem {sub_id}"
+      },
+      "running": {
+        "name": "Running status {sub_id}"
+      },
+      "safety": {
+        "name": "Safety {sub_id}"
+      },
+      "smoke": {
+        "name": "Smoke {sub_id}"
+      },
+      "sound": {
+        "name": "Sound {sub_id}"
+      },
+      "tamper": {
+        "name": "Tamper {sub_id}"
+      },
+      "update": {
+        "name": "Update {sub_id}"
+      },
+      "vibration": {
+        "name": "Vibration {sub_id}"
+      },
+      "window": {
+        "name": "Window {sub_id}"
+      }
+    },
+    "climate": {
+      "ac": {
+        "name": "Air conditioner {sub_id}",
+        "state_attributes": {
+          "fan_mode": {
+            "state": {
+              "natural": "Natural breeze",
+              "turbo": "Turbo",
+              "weak": "Gentle"
+            }
+          }
+        }
+      }
+    },
+    "fan": {
+      "airone": {
+        "name": "Airone {sub_id}"
+      },
+      "fan": {
+        "name": "Fan {sub_id}"
+      },
+      "sysclein": {
+        "name": "Sysclein {sub_id}"
+      }
+    },
+    "light": {
+      "dimming": {
+        "name": "Dimmable light {sub_id}"
+      },
+      "light": {
+        "name": "Light {sub_id}"
+      }
+    },
+    "sensor": {
+      "apparent_power": {
+        "name": "Apparent power {sub_id}"
+      },
+      "aqi": {
+        "name": "Air quality index {sub_id}"
+      },
+      "atmospheric_pressure": {
+        "name": "Atmospheric pressure {sub_id}"
+      },
+      "battery": {
+        "name": "Battery {sub_id}"
+      },
+      "carbon_dioxide": {
+        "name": "Carbon dioxide {sub_id}"
+      },
+      "carbon_monoxide": {
+        "name": "Carbon monoxide {sub_id}"
+      },
+      "current": {
+        "name": "Current {sub_id}"
+      },
+      "data_rate": {
+        "name": "Data rate {sub_id}"
+      },
+      "data_size": {
+        "name": "Data size {sub_id}"
+      },
+      "date": {
+        "name": "Date {sub_id}"
+      },
+      "distance": {
+        "name": "Distance {sub_id}"
+      },
+      "duration": {
+        "name": "Duration {sub_id}"
+      },
+      "energy": {
+        "name": "Energy {sub_id}"
+      },
+      "enum": {
+        "name": "Status {sub_id}"
+      },
+      "event": {
+        "name": "Event {sub_id}"
+      },
+      "event_uss": {
+        "name": "USS event {sub_id}"
+      },
+      "floor": {
+        "name": "Floor {sub_id}"
+      },
+      "frequency": {
+        "name": "Frequency {sub_id}"
+      },
+      "gas": {
+        "name": "Gas {sub_id}"
+      },
+      "heat": {
+        "name": "Heat {sub_id}"
+      },
+      "hotwater": {
+        "name": "Hot water {sub_id}"
+      },
+      "humidity": {
+        "name": "Humidity {sub_id}"
+      },
+      "illuminance": {
+        "name": "Illuminance {sub_id}"
+      },
+      "irradiance": {
+        "name": "Irradiance {sub_id}"
+      },
+      "moisture": {
+        "name": "Moisture {sub_id}"
+      },
+      "monetary": {
+        "name": "Amount {sub_id}"
+      },
+      "multisensor": {
+        "name": "Multi-sensor {sub_id}"
+      },
+      "nitrogen_dioxide": {
+        "name": "Nitrogen dioxide {sub_id}"
+      },
+      "nitrogen_monoxide": {
+        "name": "Nitrogen monoxide {sub_id}"
+      },
+      "nitrous_oxide": {
+        "name": "Nitrous oxide {sub_id}"
+      },
+      "ozone": {
+        "name": "Ozone {sub_id}"
+      },
+      "percentage": {
+        "name": "Percentage {sub_id}"
+      },
+      "pm1": {
+        "name": "PM1 {sub_id}"
+      },
+      "pm10": {
+        "name": "PM10 {sub_id}"
+      },
+      "pm25": {
+        "name": "PM2.5 {sub_id}"
+      },
+      "power": {
+        "name": "Power {sub_id}"
+      },
+      "power_factor": {
+        "name": "Power factor {sub_id}"
+      },
+      "precipitation": {
+        "name": "Precipitation {sub_id}"
+      },
+      "precipitation_intensity": {
+        "name": "Precipitation intensity {sub_id}"
+      },
+      "pressure": {
+        "name": "Pressure {sub_id}"
+      },
+      "reactive_power": {
+        "name": "Reactive power {sub_id}"
+      },
+      "sensor": {
+        "name": "Sensor {sub_id}"
+      },
+      "signal_strength": {
+        "name": "Signal strength {sub_id}"
+      },
+      "sound_pressure": {
+        "name": "Sound pressure {sub_id}"
+      },
+      "speed": {
+        "name": "Speed {sub_id}"
+      },
+      "string": {
+        "name": "Text {sub_id}"
+      },
+      "sulphur_dioxide": {
+        "name": "Sulfur dioxide {sub_id}"
+      },
+      "temperature": {
+        "name": "Temperature {sub_id}"
+      },
+      "timestamp": {
+        "name": "Time {sub_id}"
+      },
+      "volatile_organic_compounds": {
+        "name": "Volatile organic compounds {sub_id}"
+      },
+      "voltage": {
+        "name": "Voltage {sub_id}"
+      },
+      "volume": {
+        "name": "Volume {sub_id}"
+      },
+      "water": {
+        "name": "Water {sub_id}"
+      },
+      "weather": {
+        "name": "Weather {sub_id}"
+      },
+      "weight": {
+        "name": "Weight {sub_id}"
+      },
+      "wind_speed": {
+        "name": "Wind speed {sub_id}"
+      },
+      "worlty_run_ms": {
+        "name": "Worlty control run time {sub_id}"
+      },
+      "last_execute": {
+        "name": "Last timer run {sub_id}"
+      }
+    },
+    "switch": {
+      "cook": {
+        "name": "Gas valve {sub_id}"
+      },
+      "elevator": {
+        "name": "Elevator call {sub_id}"
+      },
+      "interphone": {
+        "name": "Intercom {sub_id}"
+      },
+      "lock": {
+        "name": "Lock {sub_id}"
+      },
+      "open": {
+        "name": "Open {sub_id}"
+      },
+      "outlet": {
+        "name": "Outlet {sub_id}"
+      },
+      "switch": {
+        "name": "Switch {sub_id}"
+      },
+      "valve": {
+        "name": "Valve {sub_id}"
+      },
+      "timer": {
+        "name": "Timer {sub_id}"
+      },
+      "worlty": {
+        "name": "Worlty control {sub_id}"
+      }
+    },
+    "number": {
+      "number": {
+        "name": "{sub_id}"
+      }
+    },
+    "time": {
+      "time": {
+        "name": "{sub_id}"
+      }
+    },
+    "date": {
+      "date": {
+        "name": "{sub_id}"
+      }
+    },
+    "water_heater": {
+      "boiler": {
+        "name": "Boiler {sub_id}"
+      }
+    }
+  },
+  "exceptions": {
+    "classic_authentication_failed": {
+      "message": "Could not verify the Classic Pad connection. Check the device address and access token."
+    },
+    "classic_connection_failed": {
+      "message": "Could not connect to Classic Pad. Check its power, network connection, address and port."
+    },
+    "hub_authentication_failed": {
+      "message": "Could not verify the Worlty Hub connection. Check that you selected the correct hub in the Worlty app."
+    },
+    "hub_connection_failed": {
+      "message": "Could not connect to Worlty Hub. Check its power and network connection. If the problem continues, download diagnostics and contact support."
+    },
+    "classic_connection_closing": {
+      "message": "The Classic Pad connection is closing. Wait a moment, then check its connection status and try again."
+    },
+    "classic_preset_mode_unknown": {
+      "message": "Could not determine which heating or cooling mode to return to. Select a mode before turning off the preset."
+    }
+  }
+}

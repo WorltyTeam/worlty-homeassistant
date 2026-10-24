@@ -1,0 +1,13 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+# Generated WDP files are verified in the separate development workspace.
+extend-exclude = ["custom_components/worlty_core/wdp"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "D", "N804", "N805", "N806", "N815"]
+# Follow HA Core: let the formatter handle long strings and document non-obvious arguments.
+ignore = ["E501", "D202", "D417"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
