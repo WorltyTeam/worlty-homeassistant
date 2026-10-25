@@ -9,6 +9,8 @@
   <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.2/assets/badges/home-assistant.svg" alt="Home Assistant 2026.9.2 이상">
 </p>
 
+[버전별 변경 내역](https://github.com/WorltyTeam/worlty-homeassistant/blob/release/2.0.0/CHANGELOG.md)
+
 | 클래식 패드 | 월티 허브 |
 | :---: | :---: |
 | <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.2/assets/products/classic-pad.jpg" alt="클래식 패드 제품 사진" width="240"> | <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.2/assets/products/worlty-hub.png" alt="월티 허브 제품 사진" width="240"> |
