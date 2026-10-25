@@ -127,15 +127,16 @@ class WorltyEntity(Entity):
             title=self.runtime.entry.title,
             pad_id=pad_id,
         )
-        parent = dr.async_get(self.runtime.hass).async_get_device(
-            identifiers={(DOMAIN, pad_id)}
+        device_registry = dr.async_get(self.runtime.hass)
+        parent = device_registry.async_get_device_by_identifier(
+            (DOMAIN, pad_id), self.runtime.entry.entry_id
         )
         if parent is not None:
             pad_name = parent.name_by_user or parent.name or pad_name
         own_identifier = (DOMAIN, f"{pad_id}:{device_id}")
         existing_names = {
             entry.name
-            for entry in dr.async_get(self.runtime.hass).devices.values()
+            for entry in device_registry.devices
             if entry.name and own_identifier not in entry.identifiers
         }
         name = child_device_name(
@@ -144,13 +145,15 @@ class WorltyEntity(Entity):
             pad_id,
             existing_names=existing_names,
         )
-        return DeviceInfo(
+        device_info = DeviceInfo(
             identifiers=identifiers,
             name=name,
             manufacturer=str(source.get("manufacturer") or "Worlty"),
             model=str(source.get("model") or "월티 허브"),
-            via_device=(DOMAIN, pad_id),
         )
+        if parent is not None:
+            device_info["via_device_id"] = parent.id
+        return device_info
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

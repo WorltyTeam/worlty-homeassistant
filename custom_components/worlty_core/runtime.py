@@ -691,9 +691,9 @@ class WorltyRuntime:
             if full:
                 prefix = f"{self.entry.data[CONF_DEVICE_ID]}:"
                 stale_device_ids = set()
-                for entry in dr.async_get(self.hass).devices.values():
-                    if self.entry.entry_id not in entry.config_entries:
-                        continue
+                for entry in dr.async_entries_for_config_entry(
+                    dr.async_get(self.hass), self.entry.entry_id
+                ):
                     for namespace, identifier in entry.identifiers:
                         if namespace != DOMAIN or not identifier.startswith(prefix):
                             continue
@@ -765,7 +765,9 @@ class WorltyRuntime:
         """Update metadata only for devices owned by this Worlty Core entry."""
         pad_id = str(self.entry.data[CONF_DEVICE_ID])
         device_registry = dr.async_get(self.hass)
-        parent = device_registry.async_get_device(identifiers={(DOMAIN, pad_id)})
+        parent = device_registry.async_get_device_by_identifier(
+            (DOMAIN, pad_id), self.entry.entry_id
+        )
         pad_name = (
             (parent.name_by_user or parent.name) if parent is not None else None
         ) or configured_pad_name(self.entry.data, title=self.entry.title, pad_id=pad_id)
@@ -773,10 +775,10 @@ class WorltyRuntime:
             metadata = self.model.devices.get(device_id)
             if metadata is None:
                 continue
-            entry = device_registry.async_get_device(
-                identifiers={(DOMAIN, f"{pad_id}:{device_id}")}
+            entry = device_registry.async_get_device_by_identifier(
+                (DOMAIN, f"{pad_id}:{device_id}"), self.entry.entry_id
             )
-            if entry is None or self.entry.entry_id not in entry.config_entries:
+            if entry is None or entry.config_entry_id != self.entry.entry_id:
                 continue
             source = (
                 metadata.get("source")
@@ -791,7 +793,7 @@ class WorltyRuntime:
                 own_identifier = (DOMAIN, f"{pad_id}:{device_id}")
                 existing_names = {
                     candidate.name
-                    for candidate in device_registry.devices.values()
+                    for candidate in device_registry.devices
                     if candidate.name
                     and candidate.id != entry.id
                     and own_identifier not in candidate.identifiers
@@ -830,10 +832,10 @@ class WorltyRuntime:
         for device_id in device_ids:
             if device_id in self.model.devices:
                 continue
-            entry = device_registry.async_get_device(
-                identifiers={(DOMAIN, f"{pad_id}:{device_id}")}
+            entry = device_registry.async_get_device_by_identifier(
+                (DOMAIN, f"{pad_id}:{device_id}"), self.entry.entry_id
             )
-            if entry is None or self.entry.entry_id not in entry.config_entries:
+            if entry is None or entry.config_entry_id != self.entry.entry_id:
                 continue
             if entry.identifiers & live_identifiers:
                 continue
@@ -843,11 +845,7 @@ class WorltyRuntime:
                 include_disabled_entities=True,
             ):
                 continue
-            if entry.config_entries - {self.entry.entry_id}:
-                device_registry.async_update_device(
-                    entry.id, remove_config_entry_id=self.entry.entry_id
-                )
-            elif entry.identifiers == {(DOMAIN, f"{pad_id}:{device_id}")}:
+            if entry.identifiers == {(DOMAIN, f"{pad_id}:{device_id}")}:
                 device_registry.async_remove_device(entry.id)
 
     async def _async_remove_registry_entities(
