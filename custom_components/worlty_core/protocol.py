@@ -54,6 +54,7 @@ from .wdp.external_auth import (
 
 _LOGGER = logging.getLogger(__name__)
 MessageHandler = Callable[[dict[str, Any]], Awaitable[bool | None]]
+_PROBE_CLOSE_TIMEOUT = 1.0
 
 
 def _device_envelope(frame: Mapping[str, Any], *, incoming: bool, scope: int) -> str:
@@ -184,6 +185,17 @@ async def _receive_json(
     return value
 
 
+async def _close_probe_websocket(websocket: ClientWebSocketResponse) -> None:
+    """Bound probe cleanup while allowing aiohttp to close its owned transport."""
+    try:
+        async with asyncio.timeout(_PROBE_CLOSE_TIMEOUT):
+            await websocket.close()
+    except TimeoutError:
+        # aiohttp closes the response when close() is cancelled, including while
+        # draining the writer. A peer's missing close reply must not hold discovery.
+        _LOGGER.debug("Local identity probe close exceeded %.1fs", _PROBE_CLOSE_TIMEOUT)
+
+
 async def _open_verified(
     session: ClientSession,
     *,
@@ -227,7 +239,10 @@ async def _open_verified(
         return websocket
     except (Exception, asyncio.CancelledError):
         if websocket is not None:
-            await websocket.close()
+            if bootstrap:
+                await _close_probe_websocket(websocket)
+            else:
+                await websocket.close()
         raise
 
 
@@ -261,7 +276,7 @@ async def async_probe_device(
         raise WorltyConnectionError("PAD identity discovery failed") from err
     finally:
         if websocket is not None:
-            await websocket.close()
+            await _close_probe_websocket(websocket)
 
 
 async def async_pair_device(
