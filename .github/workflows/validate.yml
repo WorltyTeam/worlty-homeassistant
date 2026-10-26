@@ -29,7 +29,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: home-assistant/actions/hassfest@master
+      # The published hassfest image predates support for manifest categories.
+      - name: 공식 HA 검사기 준비
+        run: >-
+          docker build --tag worlty-hassfest
+          --file script/hassfest/docker/Dockerfile
+          https://github.com/home-assistant/core.git#cbafe201068081ae89ec1d080983d0a6602d05b4
+      - name: HA 통합구성요소 검사
+        run: docker run --rm -v "$GITHUB_WORKSPACE:/github/workspace" worlty-hassfest
 
   lint:
     name: 코드 스타일 검사
