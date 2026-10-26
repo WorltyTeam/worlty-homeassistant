@@ -1,19 +1,19 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.3/assets/products/worlty-hub-hero.png" alt="Worlty 월티 허브" width="640">
+  <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.4/assets/products/worlty-hub-hero.png" alt="Worlty 월티 허브" width="640">
 </p>
 
 <p align="center">월티에 연결된 조명·냉난방·환기 기기를 Home Assistant에서도 사용하세요.</p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.3/assets/badges/version.svg" alt="버전 2.0.3">
-  <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.3/assets/badges/home-assistant.svg" alt="Home Assistant 2026.9.2 이상">
+  <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.4/assets/badges/version.svg" alt="버전 2.0.4">
+  <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.4/assets/badges/home-assistant.svg" alt="Home Assistant 2026.9.2 이상">
 </p>
 
 [버전별 변경 내역](https://github.com/WorltyTeam/worlty-homeassistant/blob/release/2.0.0/CHANGELOG.md)
 
 | 클래식 패드 | 월티 허브 |
 | :---: | :---: |
-| <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.3/assets/products/classic-pad.jpg" alt="클래식 패드 제품 사진" width="240"> | <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.3/assets/products/worlty-hub.png" alt="월티 허브 제품 사진" width="240"> |
+| <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.4/assets/products/classic-pad.jpg" alt="클래식 패드 제품 사진" width="240"> | <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.4/assets/products/worlty-hub.png" alt="월티 허브 제품 사진" width="240"> |
 | 월티 앱의 액세스 토큰으로 연결합니다. | 월티 앱에서 연결 요청을 승인합니다. |
 | [클래식 패드 연결 안내](#클래식-패드-연결) | [월티 허브 연결 안내](#월티-허브-연결) |
 

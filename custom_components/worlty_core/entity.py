@@ -18,7 +18,7 @@ from .model import (
     WorltyResource,
     provider_entity_unique_id,
 )
-from .naming import child_device_name, configured_pad_name
+from .naming import device_display_name
 from .runtime import WorltyRuntime
 from .wdp import LOCALIZATION_REGISTRY
 
@@ -70,8 +70,12 @@ class WorltyEntity(Entity):
         )
 
     @property
-    def name(self) -> str | None:
-        """Build a display name from the configured name or translated default."""
+    def name(self) -> str:
+        """Return the entity name; HA supplies device context where needed."""
+        return self._entity_name()
+
+    def _entity_name(self) -> str:
+        """Resolve the entity alias or translated name with its literal suffix."""
         resource = self.resource
         if resource is None:
             return self.resource_id
@@ -91,24 +95,16 @@ class WorltyEntity(Entity):
         name = str(label or self.resource_id)
         suffix = resource.metadata.get("name_suffix")
         if isinstance(suffix, str) and suffix:
-            name = f"{name} {suffix}"
-        # Treat an item matching the device name as its primary feature.
-        # Preserve configured names and avoid repeating the device name in default
-        # labels.
-        return None if name == self._device_name(resource.device_id) else name
+            name = f"{name}{suffix}"
+        return name
 
     def _device_name(self, device_id: str) -> str:
-        """Return the device's own name before adding the hub prefix."""
-        metadata = self.runtime.model.devices.get(device_id, {})
-        locale = self.runtime.hass.config.language
-        name = str(metadata.get("name") or "")
-        if not name:
-            labels = _LOCALIZED_KEYS.get(str(metadata.get("name_key", "")), {})
-            name = str(labels.get(locale) or labels.get("en") or device_id)
-            suffix = str(metadata.get("name_suffix") or "")
-            if suffix:
-                name = f"{name} {suffix}"
-        return name
+        """Resolve the device alias or translated name with its literal suffix."""
+        return device_display_name(
+            self.runtime.model.devices.get(device_id, {}),
+            device_id,
+            self.runtime.hass.config.language,
+        )
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -122,28 +118,9 @@ class WorltyEntity(Entity):
         pad_id = str(self.runtime.entry.data["device_id"])
         identifiers = {(DOMAIN, f"{pad_id}:{device_id}")}
         name = self._device_name(device_id)
-        pad_name = configured_pad_name(
-            self.runtime.entry.data,
-            title=self.runtime.entry.title,
-            pad_id=pad_id,
-        )
         device_registry = dr.async_get(self.runtime.hass)
         parent = device_registry.async_get_device_by_identifier(
             (DOMAIN, pad_id), self.runtime.entry.entry_id
-        )
-        if parent is not None:
-            pad_name = parent.name_by_user or parent.name or pad_name
-        own_identifier = (DOMAIN, f"{pad_id}:{device_id}")
-        existing_names = {
-            entry.name
-            for entry in device_registry.devices
-            if entry.name and own_identifier not in entry.identifiers
-        }
-        name = child_device_name(
-            pad_name,
-            name,
-            pad_id,
-            existing_names=existing_names,
         )
         device_info = DeviceInfo(
             identifiers=identifiers,

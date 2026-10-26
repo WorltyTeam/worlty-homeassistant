@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HassJob, HomeAssistant, callback
+from homeassistant.core import HassJob, HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
@@ -56,7 +56,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             title=entry.title,
             pad_id=pad_id,
         )
-        parent = dr.async_get(hass).async_get_or_create(
+        dr.async_get(hass).async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, pad_id)},
             manufacturer="Worlty",
@@ -65,7 +65,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         forwarding = True
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        _async_track_child_names(hass, entry, parent)
     except BaseException as err:
         try:
             try:
@@ -131,43 +130,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
-
-
-@callback
-def _async_track_child_names(hass: HomeAssistant, entry: ConfigEntry, parent) -> None:
-    """Propagate parent display name changes without reconnecting the device."""
-    registry = dr.async_get(hass)
-    previous_name = parent.name_by_user or parent.name
-
-    @callback
-    def parent_updated(event):
-        nonlocal previous_name
-        if (
-            event.data.get("device_id") != parent.id
-            or event.data.get("action") != "update"
-        ):
-            return
-        current = registry.devices.get(parent.id)
-        if current is None:
-            return
-        name = current.name_by_user or current.name
-        if not name or name == previous_name:
-            return
-        prefix = f"{previous_name} · "
-        previous_name = name
-        for child in dr.async_entries_for_config_entry(registry, entry.entry_id):
-            if (
-                child.via_device_id == parent.id
-                and child.name
-                and child.name.startswith(prefix)
-            ):
-                registry.async_update_device(
-                    child.id, name=f"{name} · {child.name[len(prefix) :]}"
-                )
-
-    entry.async_on_unload(
-        hass.bus.async_listen(dr.EVENT_DEVICE_REGISTRY_UPDATED, parent_updated)
-    )
 
 
 def _remove_runtime_registration(hass: HomeAssistant, entry: ConfigEntry) -> None:

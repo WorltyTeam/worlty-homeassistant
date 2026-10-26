@@ -67,10 +67,9 @@ class WorltyInputEntity(WorltyEntity):
             self.runtime.hass.config.language,
         )
 
-    @property
-    def name(self) -> str:
-        """Build a display name from the configured name or translated default."""
-        base = super().name
+    def _entity_name(self) -> str:
+        """Keep input fields distinct within the shared entity name format."""
+        base = super()._entity_name()
         field, resource = self.field, self.resource
         if field is None:
             return base or str(self.capability_id)

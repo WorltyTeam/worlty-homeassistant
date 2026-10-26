@@ -3,10 +3,28 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 
 from .const import CONF_PAD_NAME, CONF_TLS_TARGET_ID
-from .wdp.generated_external_platform import BLE_SERVICE_NAME
+from .wdp.generated_external_platform import BLE_SERVICE_NAME, LOCALIZATION_REGISTRY
+
+_LOCALIZED_KEYS = {
+    str(item["key"]): item["labels"]
+    for item in LOCALIZATION_REGISTRY.get("entries", ())
+}
+
+
+def device_display_name(
+    metadata: Mapping[str, object], device_id: str, locale: str
+) -> str:
+    """Preserve an alias or append the literal suffix to the translated name."""
+    name = metadata.get("name")
+    if isinstance(name, str) and name:
+        return name
+    labels = _LOCALIZED_KEYS.get(str(metadata.get("name_key", "")), {})
+    name = str(labels.get(locale) or labels.get("en") or device_id)
+    suffix = metadata.get("name_suffix")
+    return name + (suffix if isinstance(suffix, str) else "")
 
 
 def default_pad_name(target_id: str) -> str:
@@ -44,17 +62,3 @@ def parent_device_name(pad_name: str, pad_id: str) -> str:
     """Return the parent hub's display name."""
     name = pad_name.strip()
     return name
-
-
-def child_device_name(
-    pad_name: str,
-    resource_name: str,
-    pad_id: str,
-    *,
-    existing_names: Collection[str] = (),
-) -> str:
-    """Build a name without UUID suffixes; registry IDs preserve identity."""
-    name = pad_name.strip()
-    resource = resource_name.strip() or "Device"
-    base = f"{name} · {resource}"
-    return base

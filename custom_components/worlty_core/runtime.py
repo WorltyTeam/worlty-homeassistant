@@ -45,7 +45,7 @@ from .errors import (
 from .identity import WorltyClientIdentity, async_get_client_identity
 from .input import input_capabilities
 from .model import WorltyModel, WorltyModelChange, WorltyResource, projected_entity_ids
-from .naming import child_device_name, configured_pad_name
+from .naming import device_display_name
 from .protocol import MessageHandler, WorltyLocalClient
 from .session import PadSession
 
@@ -765,12 +765,6 @@ class WorltyRuntime:
         """Update metadata only for devices owned by this Worlty Core entry."""
         pad_id = str(self.entry.data[CONF_DEVICE_ID])
         device_registry = dr.async_get(self.hass)
-        parent = device_registry.async_get_device_by_identifier(
-            (DOMAIN, pad_id), self.entry.entry_id
-        )
-        pad_name = (
-            (parent.name_by_user or parent.name) if parent is not None else None
-        ) or configured_pad_name(self.entry.data, title=self.entry.title, pad_id=pad_id)
         for device_id in change.updated_devices:
             metadata = self.model.devices.get(device_id)
             if metadata is None:
@@ -785,27 +779,12 @@ class WorltyRuntime:
                 if isinstance(metadata.get("source"), dict)
                 else {}
             )
-            name = metadata.get("name")
+            name = device_display_name(metadata, device_id, self.hass.config.language)
             manufacturer = source.get("manufacturer")
             model = source.get("model")
             updates: dict[str, Any] = {}
-            if isinstance(name, str) and name:
-                own_identifier = (DOMAIN, f"{pad_id}:{device_id}")
-                existing_names = {
-                    candidate.name
-                    for candidate in device_registry.devices
-                    if candidate.name
-                    and candidate.id != entry.id
-                    and own_identifier not in candidate.identifiers
-                }
-                display_name = child_device_name(
-                    pad_name,
-                    name,
-                    pad_id,
-                    existing_names=existing_names,
-                )
-                if entry.name != display_name:
-                    updates["name"] = display_name
+            if entry.name != name:
+                updates["name"] = name
             if (
                 isinstance(manufacturer, str)
                 and manufacturer
