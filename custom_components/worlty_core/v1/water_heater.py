@@ -89,6 +89,7 @@ class WorltyWaterHeater(WorltyBaseEntity, WaterHeaterEntity):
 
     @callback
     def _update_entity(self) -> None:
+        """Refresh supported operation modes from the legacy device state."""
         self._supported_features = 0
         self._hvac_modes = [HVACMode.OFF]
 
@@ -127,19 +128,25 @@ class WorltyWaterHeater(WorltyBaseEntity, WaterHeaterEntity):
         return self.worlty_attribute.get("ts")
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         """Return the target temperature reported by the device."""
         return self.worlty_attribute.get("tt")
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         """Return the current temperature measured by the device."""
         return self.worlty_attribute.get("tc")
 
     @property
-    def temperature_unit(self) -> UnitOfTemperature:
+    def native_temperature_unit(self) -> UnitOfTemperature:
         """Use Celsius for temperature values."""
         return UnitOfTemperature.CELSIUS
+
+    # Older HA versions read the legacy names instead of the native API.
+    if not hasattr(WaterHeaterEntity, "native_temperature_unit"):
+        temperature_unit = native_temperature_unit
+        current_temperature = native_current_temperature
+        target_temperature = native_target_temperature
 
     @property
     def is_away_mode_on(self) -> bool:

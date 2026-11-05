@@ -69,10 +69,12 @@ _REAUTH_TRUST_KEYS = (
 
 
 async def _ignore_message(message: dict[str, Any]) -> None:
+    """Discard messages while probing an authenticated session."""
     return None
 
 
 def _txt_value(properties: dict[str, Any], key: str) -> str:
+    """Normalize a discovery TXT property to text."""
     value = properties.get(key, properties.get(key.encode(), ""))
     return value.decode(errors="ignore") if isinstance(value, bytes) else str(value)
 
@@ -84,11 +86,13 @@ def _hardware_id(value: str) -> str:
 
 
 def _display_name(value: str, fallback: str) -> str:
+    """Use a normalized device name or the supplied fallback."""
     name = "".join(character for character in value if character.isprintable()).strip()
     return name[:128] or fallback
 
 
 def _discovery_name(info: ZeroconfServiceInfo, fallback: str) -> str:
+    """Read the display name advertised by the discovered device."""
     advertised = _txt_value(info.properties, "name")
     suffix = f".{info.type}"
     if not advertised and info.name.lower().endswith(suffix.lower()):
@@ -115,6 +119,7 @@ async def async_probe_v1_device(hass, *, host: str, port: int, access_token: str
 
 
 def _entry_title(name: str, device_id: str) -> str:
+    """Build a title from the device name and stable identity."""
     return config_entry_title(name, device_id)
 
 
@@ -137,11 +142,13 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._protocol = PROTOCOL_V2
 
     def _flow_name(self) -> str:
+        """Return the name currently shown in the setup flow."""
         if self._reauth_entry is not None:
             return getattr(self._reauth_entry, "title", "") or "Worlty"
         return self._discovery.get("name") or "Worlty"
 
     def _set_flow_name(self, name: str) -> None:
+        """Store the device name shown in the setup flow."""
         self.context["title_placeholders"] = {"name": name}
 
     async def async_step_reconfigure(self, user_input=None):
@@ -584,6 +591,7 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _reauth_entry_unchanged(self) -> bool:
+        """Check that reauthentication still targets the original trust data."""
         if self._reauth_entry is None:
             return True
         original = self._reauth_original_data
@@ -593,11 +601,13 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def _register(self) -> dict[str, Any]:
+        """Complete registration within its approval deadline."""
         deadline = asyncio.get_running_loop().time() + 600.0
         async with asyncio.timeout_at(deadline):
             return await self._register_until(deadline)
 
     async def _register_until(self, deadline: float) -> dict[str, Any]:
+        """Register and authenticate the selected device before the deadline."""
         candidate = dict(self._connection)
         original = self._reauth_original_data
         identity = await async_get_client_identity(
@@ -625,6 +635,7 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             def proposal_ready(window_id: str, request_digest: str) -> None:
                 # Eager tasks may start before assignment to _registration_task.
+                """Expose the current proposal proof while approval is pending."""
                 if (
                     task is not None
                     and (
@@ -722,7 +733,8 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_finish(self, user_input=None):
         """Check registration results and create or update the config entry."""
-        assert self._registration_task is not None
+        if self._registration_task is None:
+            return self.async_abort(reason="invalid_input")
         try:
             data = self._registration_task.result()
         except WorltyIdentityMismatchError:
@@ -803,6 +815,7 @@ class _WorltyOptionsSteps:
     """Configure display options for classic pads."""
 
     async def async_step_init(self, user_input=None):
+        """Show the supported options for this config entry."""
         if self.config_entry.data.get(CONF_PROTOCOL) != PROTOCOL_V1:
             return self.async_abort(reason="export_not_enabled")
         errors = {}

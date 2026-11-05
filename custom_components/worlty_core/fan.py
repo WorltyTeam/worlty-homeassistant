@@ -29,6 +29,7 @@ class WorltyFan(WorltyEntity, FanEntity):
     """Fan entity mapping HA percentages to declared ventilation speed levels."""
 
     def _speeds(self) -> list[int]:
+        """Return speed levels allowed by the current descriptor."""
         resource = self.resource
         descriptor = resource.overrides.get("15", {}) if resource is not None else {}
         return [value for value in (1, 2, 3, 5) if value in descriptor.get("ev", [])]
@@ -151,6 +152,7 @@ class WorltyFan(WorltyEntity, FanEntity):
         )
 
     def _speed_for_percentage(self, percentage: int) -> int:
+        """Map an HA percentage to one declared speed level."""
         speeds = self._speeds()
         if (
             isinstance(percentage, bool)

@@ -39,6 +39,7 @@ _STATE_KEYS = {
 
 
 def _number(value):
+    """Check for a finite JSON number without accepting booleans."""
     try:
         return type(value) in (int, float) and math.isfinite(value)
     except OverflowError:
@@ -159,6 +160,7 @@ class DeviceSyncReceiver:
 
     @staticmethod
     def _row_shape(row: Any) -> None:
+        """Validate a record's identity and revision before staging it."""
         if (
             not isinstance(row, dict)
             or not isinstance(row.get("id"), str)
@@ -171,6 +173,7 @@ class DeviceSyncReceiver:
 
     @staticmethod
     def _page_shape(page: Any) -> None:
+        """Validate transfer headers and collection counters."""
         if not isinstance(page, dict) or type(page.get("fin")) is not bool:
             raise ValueError("Device transfer completion is invalid")
         if type(page.get("sm")) is not int or page["sm"] not in (1, 2):
@@ -197,6 +200,7 @@ class DeviceSyncReceiver:
 
     @staticmethod
     def _merged_state(previous, row, fences, *, full):
+        """Merge state fields while preserving newer capability revisions."""
         revision = row["rv"]
         result = dict(previous or {"id": row["id"], "rv": 0, "ts": 0})
         result.update(
@@ -313,6 +317,7 @@ class DeviceSyncReceiver:
                 changed[key].add(ident)
 
         def read(key, ident):
+            """Read a staged row or its retained predecessor."""
             if ident in removals[key]:
                 return None
             return updates[key].get(ident, old_rows[key].get(ident))
@@ -396,6 +401,7 @@ class DeviceSyncReceiver:
 
     @staticmethod
     def _metadata(row):
+        """Project supported name and visibility fields from a raw row."""
         item = {
             "id": row["id"],
             "rv": row["rv"],
@@ -414,6 +420,7 @@ class DeviceSyncReceiver:
         return item
 
     def _prepare_projection(self, read, changed, deleted, reset, cap_updates, old_caps):
+        """Prepare model changes before committing a complete transfer."""
         names = ("entities", "devices", "device_availability")
         prepared = {name: ({}, set()) for name in names}
         old_entities = self.model.entities
@@ -524,6 +531,7 @@ class DeviceSyncReceiver:
         old_ids, shared = set(old_projection), set(old_projection) & new_ids
 
         def projected(value):
+            """Check whether an enabled platform projection exists."""
             return value[0] is not None and value[1]
 
         added = {
@@ -566,6 +574,7 @@ class DeviceSyncReceiver:
 
     @staticmethod
     def _descriptor(value):
+        """Retain supported capability descriptor fields."""
         result = {"vt": 0}
         for key in ("vt", "ac", "ed", "pr", "ml"):
             if type(value.get(key)) is int:
@@ -585,6 +594,7 @@ class DeviceSyncReceiver:
 
     @staticmethod
     def _semantic_state(resource, row: dict[str, Any]) -> dict[str, Any]:
+        """Decode supported capability values without changing raw state."""
         values = row.get("st") if isinstance(row.get("st"), dict) else {}
         text = row.get("tx") if isinstance(row.get("tx"), dict) else {}
         result = {}

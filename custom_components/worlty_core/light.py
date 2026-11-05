@@ -18,6 +18,7 @@ class WorltyLight(WorltyEntity, LightEntity):
     """Hub light with percentage or device-specific brightness levels."""
 
     def _level_limits(self) -> tuple[int, int] | None:
+        """Return declared brightness bounds and step information."""
         resource = self.resource
         if resource is None or 31 not in resource.capabilities:
             return None

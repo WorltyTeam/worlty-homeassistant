@@ -105,6 +105,7 @@ class WorltyTime(WorltyBaseEntity, TimeEntity):
         return None
 
     def _parse_time_offset(self, offset_str: str) -> timedelta:
+        """Decode an optional UTC offset attached to a legacy time value."""
         sign = 1 if "+" in offset_str else -1
         hours, minutes = map(int, offset_str[1:].split(":"))
         return timedelta(hours=hours, minutes=minutes) * sign

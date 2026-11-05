@@ -21,6 +21,7 @@ NUMBER_RANGE = {
 
 
 def _is_exported_number(entity: dict[str, Any]) -> bool:
+    """Check whether a legacy numeric setting is exposed to HA."""
     key = entity.get("cid" if entity.get("fk", 0) != 0 else "did")
     return entity.get("hide") is not True and not is_app_managed_number(
         Platform.NUMBER, key

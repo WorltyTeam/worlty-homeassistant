@@ -194,6 +194,7 @@ class WorltyEntity(Entity):
         await super().async_will_remove_from_hass()
 
     def _handle_model_change(self, change: WorltyModelChange) -> None:
+        """Refresh current metadata or remove an obsolete projection."""
         if self.resource_id not in change.all_ids:
             return
         if not self._is_current_projection():
@@ -236,6 +237,7 @@ def setup_entry_platform(
     async_add_entities(factory(runtime, entity_id) for entity_id in sorted(known))
 
     def model_changed(change: WorltyModelChange) -> None:
+        """Register newly visible resources on this platform."""
         for entity_id in change.removed | change.retyped | change.deactivated:
             resource = runtime.model.entities.get(entity_id)
             if entity_id in known and (

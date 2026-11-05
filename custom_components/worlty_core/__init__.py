@@ -6,7 +6,11 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HassJob, HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+)
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
@@ -19,7 +23,7 @@ from .const import (
     PROTOCOL_V2,
 )
 from .coordinator import async_get_coordinator
-from .errors import WorltyAuthenticationError
+from .errors import WorltyAuthenticationError, WorltyConnectionError
 from .naming import configured_pad_name, parent_device_name
 from .runtime import WorltyRuntime
 
@@ -45,11 +49,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     runtime = WorltyRuntime(hass, entry)
     entry.runtime_data = runtime
     coordinator.register_runtime(runtime)
-    started = False
+    setup_complete = False
     forwarding = False
     try:
         await runtime.async_start()
-        started = True
         pad_id = str(entry.data[CONF_DEVICE_ID])
         pad_name = configured_pad_name(
             entry.data,
@@ -65,33 +68,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         forwarding = True
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    except BaseException as err:
-        try:
+        setup_complete = True
+    except WorltyAuthenticationError as err:
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN, translation_key="hub_authentication_failed"
+        ) from err
+    except (WorltyConnectionError, OSError, TimeoutError) as err:
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN, translation_key="hub_connection_failed"
+        ) from err
+    finally:
+        if not setup_complete:
             try:
-                if forwarding:
-                    try:
-                        await hass.config_entries.async_unload_platforms(
-                            entry, PLATFORMS
-                        )
-                    except Exception:
-                        _LOGGER.warning(
-                            "일부 설정된 월티 허브 플랫폼을 해제하지 못했습니다"
-                        )
+                try:
+                    if forwarding:
+                        try:
+                            await hass.config_entries.async_unload_platforms(
+                                entry, PLATFORMS
+                            )
+                        except (HomeAssistantError, OSError):
+                            _LOGGER.warning(
+                                "Could not unload partially configured hub platforms"
+                            )
+                finally:
+                    await runtime.async_stop()
             finally:
-                await runtime.async_stop()
-        finally:
-            _remove_runtime_registration(hass, entry)
-        if not isinstance(err, Exception):
-            raise
-        if isinstance(err, WorltyAuthenticationError):
-            raise ConfigEntryAuthFailed(
-                translation_domain=DOMAIN, translation_key="hub_authentication_failed"
-            ) from err
-        if not started:
-            raise ConfigEntryNotReady(
-                translation_domain=DOMAIN, translation_key="hub_connection_failed"
-            ) from err
-        raise
+                _remove_runtime_registration(hass, entry)
 
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     entry.async_on_unload(hass.async_add_shutdown_job(HassJob(runtime.async_stop)))
@@ -129,6 +131,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the config entry after its options change."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 

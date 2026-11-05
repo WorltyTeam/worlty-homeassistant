@@ -5,7 +5,7 @@ line-length = 88
 extend-exclude = ["custom_components/worlty_core/wdp"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "D", "N804", "N805", "N806", "N815"]
+select = ["E", "F", "I", "UP", "B", "SIM", "D", "N804", "N805", "N806", "N815", "S101", "BLE001"]
 # Follow HA Core: let the formatter handle long strings and document non-obvious arguments.
 ignore = ["E501", "D202", "D417"]
 

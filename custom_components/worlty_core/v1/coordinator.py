@@ -11,7 +11,7 @@ from homeassistant.const import (
     Platform,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN, LOGGER
 from .transport import WorltyV1AuthenticationError, WorltyV1ConnectionError
@@ -48,7 +48,4 @@ class WorltyDataCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[Platform, dict[str, dict[str, Any]]]:
         """Return the device lists cached by the API for each platform."""
-        try:
-            return await self.api.get_worlty_devices()
-        except Exception as err:
-            raise UpdateFailed(err) from err
+        return await self.api.get_worlty_devices()

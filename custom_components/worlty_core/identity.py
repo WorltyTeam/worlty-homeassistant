@@ -87,6 +87,7 @@ class _IdentityStore(Store[dict[str, Any]]):
         # them.
         # Automatic migration uses this path too, so prevent scheduling the write.
         # There is no await between this check and the parent Store's shutdown check.
+        """Save identity state only while durable writes remain available."""
         if self.hass.is_stopping:
             raise WorltyAuthenticationError(
                 "HA client identity is unavailable during shutdown"
@@ -99,6 +100,7 @@ class _IdentityStore(Store[dict[str, Any]]):
         old_minor_version: int,
         old_data: dict[str, Any],
     ) -> dict[str, Any]:
+        """Wrap the supported older identity record without rotating it."""
         if old_major_version != 2 or old_minor_version != 1:
             raise WorltyAuthenticationError(
                 "stored HA client identity version is unsupported; "
@@ -114,11 +116,13 @@ class _IdentityRepository:
     """Serialize identity reads and durable multi-device rotation updates."""
 
     def __init__(self, hass: HomeAssistant) -> None:
+        """Initialize the identity repository and its serialization lock."""
         self._hass = hass
         self._lock = asyncio.Lock()
         self._state: WorltyIdentityState | None = None
 
     async def async_resolve(self, client_id: str | None) -> WorltyClientIdentity:
+        """Resolve the active or explicitly pending pairing identity."""
         async with self._lock:
             state = await self._async_ensure_loaded()
             if client_id is None or secrets.compare_digest(
@@ -137,6 +141,7 @@ class _IdentityRepository:
             )
 
     async def _async_ensure_loaded(self) -> WorltyIdentityState:
+        """Load once and drain any durable write before releasing cancellation."""
         if self._state is not None:
             return self._state
         # Cancellation must not leave a Store write that could overwrite the next
@@ -146,16 +151,16 @@ class _IdentityRepository:
         try:
             state = await asyncio.shield(task)
         except asyncio.CancelledError:
-            while not task.done():
-                with suppress(Exception, asyncio.CancelledError):
-                    await asyncio.shield(task)
-            if not task.cancelled():
-                task.exception()
+            completion = asyncio.gather(task, return_exceptions=True)
+            while not completion.done():
+                with suppress(asyncio.CancelledError):
+                    await asyncio.shield(completion)
             raise
         self._state = state
         return state
 
     def _new_store(self) -> _IdentityStore:
+        """Create a private store for an independent durable read."""
         return _IdentityStore(
             self._hass,
             _STORE_VERSION,
@@ -165,6 +170,7 @@ class _IdentityRepository:
         )
 
     async def _async_load_state(self) -> WorltyIdentityState:
+        """Load or create durable identity state while preserving recovery data."""
         if self._hass.is_stopping:
             raise WorltyAuthenticationError(
                 "HA client identity is unavailable during shutdown"
@@ -207,6 +213,7 @@ class _IdentityRepository:
 
 
 def _new_identity() -> WorltyClientIdentity:
+    """Create a new HA client identity for explicit initialization."""
     return WorltyClientIdentity(
         client_id=f"ha_{secrets.token_hex(12)}",
         ha_instance_id=str(uuid.uuid4()),
@@ -215,6 +222,7 @@ def _new_identity() -> WorltyClientIdentity:
 
 
 def _parse_identity(value: Mapping[str, Any]) -> WorltyClientIdentity:
+    """Validate and decode one stored client identity."""
     identity = WorltyClientIdentity(
         client_id=str(value["client_id"]),
         ha_instance_id=str(value["ha_instance_id"]),
@@ -230,6 +238,7 @@ def _parse_identity(value: Mapping[str, Any]) -> WorltyClientIdentity:
 
 
 def _parse_pad_rotation(value: Mapping[str, Any]) -> WorltyPadClientRotation:
+    """Validate one stored PAD rotation receipt."""
     state = str(value["state"])
     if state not in _PAD_ROTATION_STATES:
         raise ValueError("invalid PAD rotation state")
@@ -253,6 +262,7 @@ def _parse_pad_rotation(value: Mapping[str, Any]) -> WorltyPadClientRotation:
 
 
 def _parse_state(value: Mapping[str, Any]) -> WorltyIdentityState:
+    """Validate the active identity and pending rotation state."""
     active_value = value["active"]
     if not isinstance(active_value, Mapping):
         raise TypeError("active identity must be an object")
@@ -301,6 +311,7 @@ def _parse_state(value: Mapping[str, Any]) -> WorltyIdentityState:
 
 
 def _serialize_identity(identity: WorltyClientIdentity) -> dict[str, str]:
+    """Encode a client identity for private persistent storage."""
     return {
         "client_id": identity.client_id,
         "ha_instance_id": identity.ha_instance_id,
@@ -309,6 +320,7 @@ def _serialize_identity(identity: WorltyClientIdentity) -> dict[str, str]:
 
 
 def _serialize_state(state: WorltyIdentityState) -> dict[str, Any]:
+    """Encode active and pending identities without changing their values."""
     rotation = state.rotation
     return {
         "active": _serialize_identity(state.active),
@@ -333,6 +345,7 @@ def _serialize_state(state: WorltyIdentityState) -> dict[str, Any]:
 
 
 def _repository(hass: HomeAssistant) -> _IdentityRepository:
+    """Return the HA-owned identity repository."""
     repository: Any = hass.data.get(_DATA_IDENTITY_REPOSITORY)
     if isinstance(repository, _IdentityRepository):
         return repository

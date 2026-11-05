@@ -79,6 +79,7 @@ def _build_worlty_entity_description(
     unit_of_measurement=None,
     use_translation: bool = True,
 ):
+    """Build the description selected for a supported classic pad entity."""
     description_kwargs: dict[str, Any] = {
         "key": key,
         "has_entity_name": True,
@@ -312,6 +313,7 @@ class WorltyLocal:
 
     async def auth(self, entry: ConfigEntry = None):
         """Authenticate within a timeout and check the saved device identity."""
+        authenticated = False
         try:
             async with asyncio.timeout(SETUP_TIMEOUT):
                 if not self._connected and not await self._connect():
@@ -320,6 +322,7 @@ class WorltyLocal:
                     self._subscribe, self._publish, self._access_token
                 )
                 if entry is None:
+                    authenticated = True
                     return True, data
                 if (
                     entry.data.get("mac_address") is not None
@@ -366,16 +369,15 @@ class WorltyLocal:
                             self.hass, self.health_check(), "Worlty classic health"
                         )
                     )
+                authenticated = True
                 return True, None
         except WorltyV1AuthenticationError:
-            await self.terminate()
             return False, "invalid_access_token"
         except (TimeoutError, WorltyV1ConnectionError, OSError):
-            await self.terminate()
             return False, "cannot_connect"
-        except BaseException:
-            await self.terminate()
-            raise
+        finally:
+            if not authenticated:
+                await self.terminate()
 
     async def _run_reconnect(self, *, force: bool = False) -> bool:
         """Reconnect and restart runtime tasks without creating duplicates."""
@@ -521,7 +523,7 @@ class WorltyLocal:
                 return False
 
             if not self._publish:
-                LOGGER.error("Publish object is not initialized.")
+                LOGGER.debug("Publish stream is not initialized")
                 return False
 
             LOGGER.debug("클래식 패드에 메시지를 보냅니다")
@@ -529,18 +531,9 @@ class WorltyLocal:
             await asyncio.wait_for(self._publish.drain(), timeout=5)
             return True
         except TimeoutError:
-            LOGGER.error(
-                "Publish failed > [timeout]",
-            )
-        except (ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError):
-            LOGGER.error(
-                "Publish failed > [reset]",
-            )
-        except Exception as e:
-            LOGGER.error(
-                "Publish failed > [%s]",
-                type(e).__name__,
-            )
+            LOGGER.debug("TCP publish timed out")
+        except (OSError, asyncio.IncompleteReadError):
+            LOGGER.debug("TCP publish connection failed")
         await self.terminate()
         self._schedule_reconnect()
         return False
@@ -563,14 +556,11 @@ class WorltyLocal:
 
         except TimeoutError:
             return {"error": "timeout"}
-        except (ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError):
+        except (OSError, asyncio.IncompleteReadError):
             self._connected = False
             return {"error": "connection_lost"}
-        except Exception as e:
-            LOGGER.error(
-                "Subscribe failed > [%s]",
-                type(e).__name__,
-            )
+        except ValueError:
+            LOGGER.debug("Received an invalid or oversized JSON message")
             self._connected = False
             return {"error": "connection_lost"}
 
@@ -628,7 +618,7 @@ class WorltyLocal:
     async def listen_for_message(self):
         """Dispatch received messages and schedule reconnection when needed."""
         LOGGER.debug(
-            "Listen for Worlty message",
+            "Listen for messages",
         )
         try:
             LOGGER.debug(
@@ -641,7 +631,7 @@ class WorltyLocal:
 
                 if message.get("error") == "connection_lost":
                     LOGGER.warning(
-                        "Socket closed. Reconnecting...",
+                        "Socket closed; reconnecting",
                     )
                     self._connected = False
                     break
@@ -1192,6 +1182,7 @@ class WorltyBaseEntity(Entity):
         self.coordinator.unregister_entity(self)
 
     def _update_callback(self):
+        """Schedule a state update after classic pad data changes."""
         self.schedule_update_ha_state()
 
     def _child_display_name(self, name: str | None) -> str:

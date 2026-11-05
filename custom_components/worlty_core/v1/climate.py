@@ -163,6 +163,7 @@ class WorltyClimate(WorltyBaseEntity, ClimateEntity):
 
     @callback
     def _update_entity(self) -> None:
+        """Refresh supported legacy HVAC controls and the current action."""
         self._supported_features = 0
         self._hvac_modes = [HVACMode.OFF]
         self._preset_modes = [PRESET_NONE]
@@ -193,7 +194,7 @@ class WorltyClimate(WorltyBaseEntity, ClimateEntity):
             if ssw & (1 << swing_bit) and swing_mode not in self._swing_modes:
                 self._swing_modes.append(swing_mode)
 
-        tt, tc = self.target_temperature, self.current_temperature
+        tt, tc = self.native_target_temperature, self.native_current_temperature
         ht, hc = self.target_humidity, self.current_humidity
 
         features = ClimateEntityFeature.TURN_ON
@@ -295,7 +296,7 @@ class WorltyClimate(WorltyBaseEntity, ClimateEntity):
         return self._supported_features
 
     @property
-    def temperature_unit(self) -> UnitOfTemperature:
+    def native_temperature_unit(self) -> UnitOfTemperature:
         """Use Celsius for temperature values."""
         return UnitOfTemperature.CELSIUS
 
@@ -315,14 +316,20 @@ class WorltyClimate(WorltyBaseEntity, ClimateEntity):
         return self.worlty_attribute.get("ts")
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         """Return the target temperature reported by the device."""
         return self.worlty_attribute.get("tt")
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         """Return the current temperature measured by the device."""
         return self.worlty_attribute.get("tc")
+
+    # Older HA versions read the legacy names instead of the native API.
+    if not hasattr(ClimateEntity, "native_temperature_unit"):
+        temperature_unit = native_temperature_unit
+        current_temperature = native_current_temperature
+        target_temperature = native_target_temperature
 
     @property
     def target_humidity(self) -> float | None:

@@ -16,6 +16,7 @@ from uuid import UUID
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -204,28 +205,32 @@ class WorltyRuntime:
             self._async_connection_loop(),
             f"worlty-core-{self.entry.entry_id}",
         )
+        wait_complete = False
         try:
             done, _pending = await asyncio.wait(
                 {first_connection},
                 timeout=20.0,
             )
             if not done:
+                wait_complete = True
                 _LOGGER.warning(
-                    "설정 중 월티 허브에 연결할 수 없습니다. "
+                    "설정 중 허브에 연결할 수 없습니다. "
                     "인증된 HA 식별 정보와 로컬 투영 상태를 유지합니다"
                 )
                 return
             await first_connection
-        except Exception:
-            await self.async_stop()
-            raise
+            wait_complete = True
         finally:
-            self._first_connection = None
-            if not first_connection.done():
-                first_connection.cancel()
-            elif not first_connection.cancelled():
-                # Consume late authentication errors when no caller is left waiting.
-                first_connection.exception()
+            try:
+                if not wait_complete:
+                    await self.async_stop()
+            finally:
+                self._first_connection = None
+                if not first_connection.done():
+                    first_connection.cancel()
+                elif not first_connection.cancelled():
+                    # Consume late authentication errors when no caller is left waiting.
+                    first_connection.exception()
 
     async def async_stop(self) -> None:
         """Stop reconnect tasks, listeners, and the local session."""
@@ -267,6 +272,7 @@ class WorltyRuntime:
         self._listeners.add(listener)
 
         def unsubscribe() -> None:
+            """Remove this model listener."""
             self._listeners.discard(listener)
 
         return unsubscribe
@@ -359,6 +365,7 @@ class WorltyRuntime:
             item["tx"] = tx
 
         def correlated_data(message):
+            """Return the single result matching this control item and epoch."""
             result = message.get("payload")
             data = result.get("d") if isinstance(result, dict) else None
             state = data.get("st") if isinstance(data, dict) else None
@@ -376,6 +383,7 @@ class WorltyRuntime:
             return data
 
         async def on_update(message):
+            """Wait for a terminal result belonging to this control item."""
             if message.get("contract") != "PadDeviceControlResult":
                 return False
             result = message["payload"]
@@ -458,11 +466,13 @@ class WorltyRuntime:
             raise WorltyRequestError(reason, item_rid)
 
     async def _async_connection_loop(self) -> None:
+        """Maintain the authenticated connection and retry expected transport failures."""
+        if self._client is None:
+            raise RuntimeError("Local client must be initialized before connecting")
         delay = 1
         while not self._stop.is_set():
             stage = "tls_wss"
             try:
-                assert self._client is not None
                 expected_pin = str(self.entry.data[CONF_TLS_SPKI_SHA256])
                 self._client.set_expected_pin(expected_pin)
                 await self._client.async_connect()
@@ -506,12 +516,17 @@ class WorltyRuntime:
                     self._first_connection.set_exception(err)
                     return
                 _LOGGER.warning(
-                    "설정 후 월티 허브가 인증을 거절했습니다: %s",
+                    "설정 후 허브가 인증을 거절했습니다: %s",
                     type(err).__name__,
                 )
                 self.entry.async_start_reauth(self.hass)
                 return
-            except Exception as err:
+            except (
+                WorltyConnectionError,
+                WorltyRequestError,
+                OSError,
+                TimeoutError,
+            ) as err:
                 self._record_connection_failure(
                     self._client.connection_diagnostics()["stage"]
                     if stage == "tls_wss" and self._client is not None
@@ -525,7 +540,7 @@ class WorltyRuntime:
                 ):
                     self._first_connection.set_result(None)
                 _LOGGER.warning(
-                    "월티 허브 연결이 중단됐습니다 (%s): %s", stage, type(err).__name__
+                    "허브 연결이 중단됐습니다 (%s): %s", stage, type(err).__name__
                 )
             finally:
                 self._device_sync.abort()
@@ -545,6 +560,7 @@ class WorltyRuntime:
                 delay = min(delay * 2, 30)
 
     async def _async_full_device_sync(self) -> None:
+        """Subscribe to the Device stream and fall back to one full query."""
         self._require_scope("observe")
         client = self._client
         if client is None or not client.connected:
@@ -553,16 +569,20 @@ class WorltyRuntime:
         self._device_sync_ready = False
         self._device_resync_used = False
         self._device_subscription_rid = f"ha-sync-{secrets.token_hex(12)}"
+        subscribed = False
         try:
-            await client.async_subscribe_device(self._device_subscription_rid)
-        except WorltyRequestError:
-            await self._async_device_resync()
-        except BaseException:
-            self._device_sync.abort()
-            self._device_subscription_rid = None
-            raise
+            try:
+                await client.async_subscribe_device(self._device_subscription_rid)
+            except WorltyRequestError:
+                await self._async_device_resync()
+            subscribed = True
+        finally:
+            if not subscribed:
+                self._device_sync.abort()
+                self._device_subscription_rid = None
 
     async def _async_device_resync(self) -> None:
+        """Request one bounded resync while retaining the authenticated channel."""
         client = self._client
         if (
             self._device_resync_used
@@ -587,6 +607,7 @@ class WorltyRuntime:
             self._device_sync.abort()
 
     async def _async_handle_message(self, message: dict[str, Any]) -> bool | None:
+        """Apply validated Device updates and track subscription errors."""
         if message.get("t") == "error":
             if (
                 self._device_subscription_rid is not None
@@ -605,7 +626,7 @@ class WorltyRuntime:
                     or previous != self._last_connection_error
                 ):
                     _LOGGER.warning(
-                        "월티 허브의 상태 동기화 중 오류가 발생했습니다 (코드: %s)",
+                        "허브의 상태 동기화 중 오류가 발생했습니다 (코드: %s)",
                         self._last_connection_error["code"],
                     )
             return None
@@ -668,6 +689,7 @@ class WorltyRuntime:
     async def _async_publish_device_change(
         self, change: WorltyModelChange, *, full: bool = False
     ) -> None:
+        """Publish committed Device changes to HA registries and listeners."""
         removed_device_ids = change.removed_devices
         try:
             # Check current display targets when the listener performs removal.
@@ -708,9 +730,9 @@ class WorltyRuntime:
                 removed_device_ids |= frozenset(stale_device_ids)
             if change.all_ids or change.all_device_ids:
                 self._sync_device_registry_metadata(change)
-        except Exception:
+        except (HomeAssistantError, ValueError, TypeError, KeyError):
             _LOGGER.exception(
-                "Worlty registry presentation failed; Device records remain committed"
+                "Registry presentation failed; Device records remain committed"
             )
         if change.all_ids:
             self._notify(change)
@@ -721,31 +743,36 @@ class WorltyRuntime:
             )
 
     def _set_connected(self, connected: bool) -> None:
+        """Notify listeners when connection availability changes."""
         if self.connected == connected:
             return
         self.connected = connected
         self._notify(WorltyModelChange(updated=frozenset(self.model.entities)))
 
     def _notify(self, change: WorltyModelChange) -> None:
+        """Notify each listener while isolating expected presentation failures."""
         for listener in tuple(self._listeners):
             try:
                 listener(change)
-            except Exception:
+            except (HomeAssistantError, ValueError, TypeError, KeyError):
                 _LOGGER.exception(
-                    "Worlty entity presentation failed; continuing other listeners"
+                    "Entity presentation failed; continuing other listeners"
                 )
 
     def _require_scope(self, scope: str) -> None:
+        """Reject operations outside the granted session scopes."""
         if not self._has_scope(scope):
             raise WorltyRequestError("not_authorized", scope)
 
     def _has_scope(self, scope: str) -> bool:
+        """Check whether the connected client holds the requested scope."""
         client = self._client
         return (
             client is not None and client.connected and scope in client.granted_scopes
         )
 
     def _configured_auth_scopes(self) -> tuple[str, ...]:
+        """Validate the stored scope names before opening a session."""
         value = self.entry.data.get(CONF_AUTH_SCOPES)
         if not isinstance(value, list) or any(
             not isinstance(scope, str) for scope in value

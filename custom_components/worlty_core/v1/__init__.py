@@ -11,7 +11,11 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HassJob, HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+)
 from homeassistant.helpers import entity_registry as er
 
 from ..const import CONF_V1_MODE, DOMAIN, V1_MODE_ADVANCED, V1_MODE_BASIC
@@ -119,6 +123,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = WorltyDataCoordinator(hass, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"api": coordinator}
     entry.runtime_data = coordinator
+    setup_complete = False
     forwarding = False
     try:
         await coordinator.connect()
@@ -132,29 +137,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         forwarding = True
         await hass.config_entries.async_forward_entry_setups(entry, V1_PLATFORMS)
-    except BaseException as err:
-        try:
-            if forwarding:
-                try:
-                    await hass.config_entries.async_unload_platforms(
-                        entry, V1_PLATFORMS
-                    )
-                except Exception:
-                    LOGGER.warning(
-                        "일부 설정된 클래식 패드 플랫폼을 해제하지 못했습니다"
-                    )
-        finally:
-            await _async_dispose(hass, entry, coordinator)
-        if isinstance(err, WorltyV1AuthenticationError):
-            raise ConfigEntryAuthFailed(
-                translation_domain=DOMAIN,
-                translation_key="classic_authentication_failed",
-            ) from err
-        if isinstance(err, (WorltyV1ConnectionError, OSError, asyncio.TimeoutError)):
-            raise ConfigEntryNotReady(
-                translation_domain=DOMAIN, translation_key="classic_connection_failed"
-            ) from err
-        raise
+        setup_complete = True
+    except WorltyV1AuthenticationError as err:
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN,
+            translation_key="classic_authentication_failed",
+        ) from err
+    except (WorltyV1ConnectionError, OSError, TimeoutError) as err:
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN, translation_key="classic_connection_failed"
+        ) from err
+    finally:
+        if not setup_complete:
+            try:
+                if forwarding:
+                    try:
+                        await hass.config_entries.async_unload_platforms(
+                            entry, V1_PLATFORMS
+                        )
+                    except (HomeAssistantError, OSError):
+                        LOGGER.warning(
+                            "Could not unload partially configured classic pad platforms"
+                        )
+            finally:
+                await _async_dispose(hass, entry, coordinator)
     entry.async_on_unload(hass.async_add_shutdown_job(HassJob(coordinator.async_close)))
     return True
 

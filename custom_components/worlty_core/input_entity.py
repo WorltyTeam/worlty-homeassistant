@@ -116,6 +116,7 @@ def setup_input_platform(
     runtime = entry.runtime_data
 
     def fields(resource_id: str) -> set[tuple[str, int]]:
+        """List visible input fields supported by this platform."""
         resource = runtime.model.entities.get(resource_id)
         if resource is None or not resource.visible or not resource.enabled:
             return set()
@@ -139,6 +140,7 @@ def setup_input_platform(
     )
 
     def model_changed(change: WorltyModelChange) -> None:
+        """Track added and removed fields without replacing retained identities."""
         affected = {key for key in known if key[0] in change.all_ids}
         current = set().union(*(fields(resource_id) for resource_id in change.all_ids))
         new = current - known

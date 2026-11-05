@@ -119,6 +119,7 @@ def _read_challenge(frame: Mapping[str, Any], *, pairing: bool = False) -> None:
 
 
 def _binding_generation(value: Any) -> str:
+    """Validate the nonzero registration generation identifier."""
     if (
         not isinstance(value, str)
         or re.fullmatch(r"[0-9a-f]{16}", value) is None
@@ -172,6 +173,7 @@ async def _receive_json(
     *,
     timeout: float,
 ) -> dict[str, Any]:
+    """Receive one JSON object or raise a transport validation error."""
     async with asyncio.timeout(timeout):
         message = await websocket.receive()
     if message.type != WSMsgType.TEXT:
@@ -207,7 +209,9 @@ async def _open_verified(
     path: str,
     bootstrap: bool = False,
 ) -> ClientWebSocketResponse:
+    """Open a WebSocket and verify its TLS identity before returning it."""
     websocket = None
+    verified = False
     try:
         if not bootstrap and (not expected_pin or not expected_target_id):
             raise WorltyAuthenticationError(
@@ -236,14 +240,14 @@ async def _open_verified(
                     expected_target_id=expected_target_id,
                     expected_spki_sha256=expected_pin,
                 )
+        verified = True
         return websocket
-    except (Exception, asyncio.CancelledError):
-        if websocket is not None:
+    finally:
+        if websocket is not None and not verified:
             if bootstrap:
                 await _close_probe_websocket(websocket)
             else:
                 await websocket.close()
-        raise
 
 
 async def async_probe_device(
@@ -451,6 +455,7 @@ class WorltyLocalClient:
         }
 
     def _record_received(self) -> None:
+        """Record receipt time without retaining message contents."""
         # Optional timing samples must not cause received frames to be rejected.
         with suppress(OSError, OverflowError, ValueError):
             self._last_received_at = datetime.now(UTC).isoformat(timespec="seconds")
@@ -491,6 +496,7 @@ class WorltyLocalClient:
                 path=LOCAL_API_PATH,
             )
             self._connection_stage = "authentication"
+            authenticated = False
             try:
                 async with asyncio.timeout(5.0):
                     challenge = await _receive_json(websocket, timeout=5.0)
@@ -585,9 +591,10 @@ class WorltyLocalClient:
                         raise WorltyAuthenticationError(
                             "PAD auth principal does not match this external platform"
                         )
-            except (Exception, asyncio.CancelledError):
-                await websocket.close()
-                raise
+                authenticated = True
+            finally:
+                if not authenticated:
+                    await websocket.close()
         except (ClientError, TimeoutError) as err:
             raise WorltyConnectionError(str(err)) from err
 
@@ -666,6 +673,7 @@ class WorltyLocalClient:
     async def _async_device_transfer(
         self, frame: dict[str, Any], *, timeout: float
     ) -> dict[str, Any]:
+        """Wait for a complete Device subscription or query transfer."""
         request_id = frame["rid"]
         websocket = self._websocket
         if websocket is None or websocket.closed:
@@ -749,6 +757,7 @@ class WorltyLocalClient:
         return response
 
     async def _async_reader(self) -> None:
+        """Read Local API frames and close session state when the reader exits."""
         websocket = self._websocket
         if websocket is None:
             return
@@ -786,9 +795,19 @@ class WorltyLocalClient:
                     break
         except asyncio.CancelledError:
             raise
-        except Exception as err:  # The connection owner reports and reconnects.
-            failure = WorltyConnectionError(str(err))
-            _LOGGER.debug("Worlty Local API reader stopped (%s)", type(err).__name__)
+        except (
+            ClientError,
+            OSError,
+            TimeoutError,
+            WorltyConnectionError,
+            RuntimeError,
+        ) as err:
+            # Callback RuntimeErrors can contain received values. Revoke the
+            # session and expose only the error type to waiting requests.
+            failure = WorltyConnectionError(
+                f"Local API reader stopped ({type(err).__name__})"
+            )
+            _LOGGER.debug("Local API reader stopped (%s)", type(err).__name__)
         finally:
             await websocket.close()
             if self._websocket is websocket:
@@ -801,6 +820,7 @@ class WorltyLocalClient:
             self._fail_pending(failure)
 
     async def _async_handle_control(self, message: dict[str, Any]) -> None:
+        """Dispatch Local API control frames and correlated request results."""
         if message.get("t") == "ping" and self._websocket is not None:
             if not isinstance(message.get("id"), str):
                 return
@@ -910,6 +930,7 @@ class WorltyLocalClient:
                 future.set_result(message)
 
     def _fail_pending(self, error: Exception) -> None:
+        """Fail and release all pending requests after connection closure."""
         for future in tuple(self._pending.values()):
             if not future.done():
                 future.set_exception(error)

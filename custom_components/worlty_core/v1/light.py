@@ -16,6 +16,7 @@ from .worlty import WorltyBaseEntity
 
 
 def _coerce_int(value: Any, default: int | None = 0) -> int | None:
+    """Read an integer value or retain the supplied fallback."""
     if value is None:
         return default
     try:
@@ -25,6 +26,7 @@ def _coerce_int(value: Any, default: int | None = 0) -> int | None:
 
 
 def _clamp_brightness(value: int) -> int:
+    """Bound an HA brightness value to its supported range."""
     return min(max(value, 1), 255)
 
 
@@ -69,6 +71,7 @@ class WorltyLight(WorltyBaseEntity, LightEntity):
         self.dim_level = []
 
     def _sync_dimming_levels(self) -> int:
+        """Refresh the supported legacy dimming level range."""
         self.wt_level_max = _coerce_int(self.worlty_attribute.get("lvm"), 0)
         if self.wt_level_max > 1:
             if len(self.dim_level) != self.wt_level_max:
@@ -78,6 +81,7 @@ class WorltyLight(WorltyBaseEntity, LightEntity):
         return self.wt_level_max
 
     def _turn_on_brightness(self, requested: Any = None) -> int:
+        """Choose requested or retained brightness for a turn-on command."""
         bri = _coerce_int(requested, 0)
         if bri is not None and bri > 0:
             return _clamp_brightness(bri)

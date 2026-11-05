@@ -60,21 +60,27 @@ _SWING_MODE_IDS = {value: key for key, value in _SWING_MODES.items()}
 class WorltyClimate(WorltyEntity, ClimateEntity):
     """Worlty hub climate entity mapping WDP mode IDs to HA modes."""
 
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         """Return the observed temperature."""
         resource = self.resource
         value = resource.state.get("ct") if resource is not None else None
         return float(value) if isinstance(value, (int, float)) else None
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         """Return the target temperature."""
         resource = self.resource
         value = resource.state.get("tt") if resource is not None else None
         return float(value) if isinstance(value, (int, float)) else None
+
+    # Older HA versions read the legacy names instead of the native API.
+    if not hasattr(ClimateEntity, "native_temperature_unit"):
+        _attr_temperature_unit = _attr_native_temperature_unit
+        current_temperature = native_current_temperature
+        target_temperature = native_target_temperature
 
     @property
     def hvac_mode(self) -> HVACMode | None:
@@ -91,6 +97,7 @@ class WorltyClimate(WorltyEntity, ClimateEntity):
 
     @property
     def _supports_away_mode(self) -> bool:
+        """Check whether the device declares the away operating mode."""
         resource = self.resource
         if (
             resource is None

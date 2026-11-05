@@ -30,6 +30,7 @@ _UNITS = {item["id"]: item["wire"] for item in MEASUREMENT_UNITS}
 
 
 def _number(value: Any) -> bool:
+    """Check for a finite descriptor number without accepting booleans."""
     try:
         return type(value) in (int, float) and math.isfinite(value)
     except OverflowError:
@@ -95,6 +96,7 @@ class InputCapability:
         )
 
     def _definition(self, key: str, default_key: str, fallback: Any = None) -> Any:
+        """Prefer an explicit descriptor field over its default definition."""
         return self.descriptor.get(key, self.defaults.get(default_key, fallback))
 
     @property

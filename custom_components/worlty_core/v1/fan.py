@@ -108,6 +108,7 @@ class WorltyFan(WorltyBaseEntity, FanEntity):
 
     @callback
     def _update_entity(self) -> None:
+        """Refresh legacy fan attributes from the received device state."""
         self._supported_features = 0
         self._fan_modes = []
         self._fan_speeds = []

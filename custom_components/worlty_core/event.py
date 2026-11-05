@@ -26,6 +26,7 @@ class WorltyEvent(WorltyEntity, EventEntity):
         )
 
     def _handle_model_change(self, change: WorltyModelChange) -> None:
+        """Refresh metadata and emit only new valid event revisions."""
         resource = self.resource
         if resource is not None and self.resource_id in change.all_ids:
             epoch = self.runtime.device_epoch
