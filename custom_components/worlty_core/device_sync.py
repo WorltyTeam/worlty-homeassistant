@@ -8,6 +8,7 @@ import math
 from dataclasses import replace
 from typing import Any
 
+from .display_name import display_names
 from .model import WorltyModel, WorltyModelChange, WorltyResource
 from .wdp.generated_external_platform import CAPABILITY_BY_ID
 
@@ -46,7 +47,9 @@ def _number(value):
 
 def _retained_size(value):
     """Measure raw rows and replay history using the same UTF-8 byte budget."""
-    return len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+    return len(
+        json.dumps(value, ensure_ascii=False).encode("utf-8", errors="surrogatepass")
+    )
 
 
 _CONTROL_KEYS = {
@@ -101,7 +104,9 @@ class DeviceSyncReceiver:
             if identity != transfer["identity"]:
                 raise ValueError("Device transfer identity changed before completion")
             transfer["bytes"] += len(
-                json.dumps(page, ensure_ascii=False, allow_nan=False).encode("utf-8")
+                json.dumps(page, ensure_ascii=False, allow_nan=False).encode(
+                    "utf-8", errors="surrogatepass"
+                )
             )
             # This consumer memory budget is independent of firmware schema versions.
             if transfer["bytes"] > _MAX_BUFFER_BYTES:
@@ -403,6 +408,8 @@ class DeviceSyncReceiver:
         ):
             if isinstance(row.get(wire), str):
                 item[semantic] = row[wire]
+        if names := display_names(row.get("dn")):
+            item["display_names"] = names
         item["enabled"] = row.get("en") is True
         return item
 

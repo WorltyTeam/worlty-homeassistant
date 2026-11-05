@@ -13,6 +13,11 @@ from homeassistant.helpers.entity import DeviceInfo, Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
+from .display_name import (
+    contentful_name,
+    default_name_with_suffix,
+    localized_display_name,
+)
 from .model import (
     WorltyModelChange,
     WorltyResource,
@@ -39,7 +44,6 @@ _LOCALIZED_KEYS = {
 class WorltyEntity(Entity):
     """Base class for one Worlty hub Device API entity."""
 
-    _attr_has_entity_name = True
     _attr_should_poll = False
 
     def __init__(self, runtime: WorltyRuntime, resource_id: str) -> None:
@@ -70,8 +74,26 @@ class WorltyEntity(Entity):
         )
 
     @property
+    def has_entity_name(self) -> bool:
+        """Let HA add device context only for legacy functional default names.
+
+        HA may still add device context to a complete alias under its own naming
+        policy. This integration never prefixes a complete firmware name itself.
+        """
+        return self._complete_name() is None
+
+    def _complete_name(self) -> str | None:
+        """Prefer the derived firmware name, then a contentful legacy alias."""
+        resource = self.resource
+        if resource is None:
+            return None
+        return localized_display_name(
+            resource.metadata.get("display_names"), self.runtime.hass.config.language
+        ) or contentful_name(resource.metadata.get("name"))
+
+    @property
     def name(self) -> str:
-        """Return the entity name; HA supplies device context where needed."""
+        """Return the firmware name or legacy function label for HA to present."""
         return self._entity_name()
 
     def _entity_name(self) -> str:
@@ -79,8 +101,8 @@ class WorltyEntity(Entity):
         resource = self.resource
         if resource is None:
             return self.resource_id
-        name = resource.metadata.get("name")
-        if isinstance(name, str) and name:
+        name = self._complete_name()
+        if name is not None:
             return name
         locale = self.runtime.hass.config.language
         label = None
@@ -93,10 +115,7 @@ class WorltyEntity(Entity):
             if label:
                 break
         name = str(label or self.resource_id)
-        suffix = resource.metadata.get("name_suffix")
-        if isinstance(suffix, str) and suffix:
-            name = f"{name}{suffix}"
-        return name
+        return default_name_with_suffix(name, resource.metadata.get("name_suffix"))
 
     def _device_name(self, device_id: str) -> str:
         """Resolve the device alias or translated name with its literal suffix."""
@@ -183,6 +202,12 @@ class WorltyEntity(Entity):
                 f"{DOMAIN}-remove-{self.resource_id}",
             )
             return
+        # HA sets this during registration; metadata can later change name mode.
+        entry = getattr(self, "registry_entry", None)
+        if entry is not None and entry.has_entity_name != self.has_entity_name:
+            self.registry_entry = er.async_get(self.hass).async_update_entity(
+                self.entity_id, has_entity_name=self.has_entity_name
+            )
         self.async_write_ha_state()
 
     async def _async_remove_completely(self) -> None:

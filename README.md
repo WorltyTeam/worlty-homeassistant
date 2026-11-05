@@ -1,19 +1,19 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.4/assets/products/worlty-hub-hero.png" alt="Worlty 월티 허브" width="640">
+  <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.5/assets/products/worlty-hub-hero.png" alt="Worlty 월티 허브" width="640">
 </p>
 
 <p align="center">월티에 연결된 조명·냉난방·환기 기기를 Home Assistant에서도 사용하세요.</p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.4/assets/badges/version.svg" alt="버전 2.0.4">
-  <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.4/assets/badges/home-assistant.svg" alt="Home Assistant 2026.9.2 이상">
+  <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.5/assets/badges/version.svg" alt="버전 2.0.5">
+  <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.5/assets/badges/home-assistant.svg" alt="Home Assistant 2026.9.2 이상">
 </p>
 
 [버전별 변경 내역](https://github.com/WorltyTeam/worlty-homeassistant/blob/release/2.0.0/CHANGELOG.md)
 
 | 클래식 패드 | 월티 허브 |
 | :---: | :---: |
-| <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.4/assets/products/classic-pad.jpg" alt="클래식 패드 제품 사진" width="240"> | <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.4/assets/products/worlty-hub.png" alt="월티 허브 제품 사진" width="240"> |
+| <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.5/assets/products/classic-pad.jpg" alt="클래식 패드 제품 사진" width="240"> | <img src="https://raw.githubusercontent.com/WorltyTeam/worlty-homeassistant/v2.0.5/assets/products/worlty-hub.png" alt="월티 허브 제품 사진" width="240"> |
 | 월티 앱의 액세스 토큰으로 연결합니다. | 월티 앱에서 연결 요청을 승인합니다. |
 | [클래식 패드 연결 안내](#클래식-패드-연결) | [월티 허브 연결 안내](#월티-허브-연결) |
 
@@ -23,24 +23,24 @@ Worlty 하나로 두 제품을 모두 연결할 수 있습니다.
 
 Home Assistant **2026.9.2 이상**이 필요합니다. Home Assistant와 월티 제품을 같은 네트워크에 연결하고, 월티 앱에서 제품이 온라인인지 확인해 주세요.
 
-1. 아래 버튼을 눌러 HACS에 Worlty 저장소를 추가하고 내려받으세요.
+1. 아래 버튼을 눌러 Worlty 저장소를 추가하고 내려받으세요. Home Assistant **2026.11 이상**에서는 **설정 > Marketplace**, 이전 버전에서는 HACS가 열립니다.
 
-   [![HACS에서 Worlty 열기](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=WorltyTeam&repository=worlty-homeassistant&category=integration)
+   [![Marketplace 또는 HACS에서 Worlty 열기](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=WorltyTeam&repository=worlty-homeassistant&category=integration)
 
-2. 설치가 끝나면 Home Assistant를 재시작하세요. 업데이트한 뒤에도 재시작해 주세요.
+2. 재시작 안내가 나타나면 Home Assistant를 재시작하세요. 업데이트한 뒤에는 재시작이 필요합니다.
 
 <details>
-<summary>버튼으로 설치할 수 없거나 HACS를 사용하지 않는 경우</summary>
+<summary>버튼으로 설치할 수 없거나 직접 설치하는 경우</summary>
 
-**HACS에 직접 추가하기**
+**Marketplace 또는 HACS에 직접 추가하기**
 
-HACS의 **사용자 지정 저장소**에 `https://github.com/WorltyTeam/worlty-homeassistant`를 입력하고, 종류를 **통합구성요소**로 선택해 내려받으세요.
+Marketplace 또는 HACS의 **사용자 지정 저장소**에 `https://github.com/WorltyTeam/worlty-homeassistant`를 입력하고, 종류를 **통합구성요소**로 선택해 내려받으세요.
 
-**HACS 없이 설치하기**
+**파일을 직접 복사해 설치하기**
 
 이 저장소를 내려받아 `custom_components/worlty_core` 폴더를 Home Assistant 설정 폴더의 `custom_components` 아래에 복사하세요.
 
-어느 방법으로 설치하든 끝나면 Home Assistant를 재시작해 주세요.
+파일을 직접 복사한 경우에는 Home Assistant를 재시작해 주세요.
 
 </details>
 

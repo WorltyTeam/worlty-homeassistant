@@ -6,6 +6,7 @@ import re
 from collections.abc import Mapping
 
 from .const import CONF_PAD_NAME, CONF_TLS_TARGET_ID
+from .display_name import contentful_name, default_name_with_suffix
 from .wdp.generated_external_platform import BLE_SERVICE_NAME, LOCALIZATION_REGISTRY
 
 _LOCALIZED_KEYS = {
@@ -18,13 +19,12 @@ def device_display_name(
     metadata: Mapping[str, object], device_id: str, locale: str
 ) -> str:
     """Preserve an alias or append the literal suffix to the translated name."""
-    name = metadata.get("name")
-    if isinstance(name, str) and name:
+    name = contentful_name(metadata.get("name"))
+    if name is not None:
         return name
     labels = _LOCALIZED_KEYS.get(str(metadata.get("name_key", "")), {})
     name = str(labels.get(locale) or labels.get("en") or device_id)
-    suffix = metadata.get("name_suffix")
-    return name + (suffix if isinstance(suffix, str) else "")
+    return default_name_with_suffix(name, metadata.get("name_suffix"))
 
 
 def default_pad_name(target_id: str) -> str:

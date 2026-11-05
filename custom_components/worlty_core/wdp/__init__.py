@@ -14,7 +14,7 @@ from .generated_external_platform import (
     CAPABILITY_BY_ID,
 )
 
-WDP_SOURCE_SHA = "17b1c45741211331c8e0cd94b6ea58860ca02fda"
+WDP_SOURCE_SHA = "2f6025df7d8780b8c3cf5b5625b5d01750737e9a"
 
 __all__ = [
     "encode_local_auth_transcript",
