@@ -13,6 +13,37 @@ _LOCALIZED_KEYS = {
     str(item["key"]): item["labels"]
     for item in LOCALIZATION_REGISTRY.get("entries", ())
 }
+INTERPHONE_TIME_KEYS = frozenset(
+    {
+        "entity.setting.interphone.open_wait",
+        "entity.setting.interphone.auto_open_duration",
+        "entity.setting.interphone.reject_window",
+    }
+)
+_INTERPHONE_ENTRANCES = {
+    "home": {"ko": "세대현관", "en": "Home entrance"},
+    "apartment": {"ko": "공동현관", "en": "Building entrance"},
+}
+
+
+def interphone_time_name(metadata: Mapping[str, object], name: str) -> str:
+    """Qualify generic time labels while preserving aliases and complete names."""
+    key = metadata.get("name_key")
+    entrance = metadata.get("interphone_entrance")
+    if (
+        not isinstance(key, str)
+        or key not in INTERPHONE_TIME_KEYS
+        or not isinstance(entrance, str)
+        or entrance not in _INTERPHONE_ENTRANCES
+        or contentful_name(metadata.get("name")) is not None
+        or metadata.get("name_suffix")
+    ):
+        return name
+    defaults = _LOCALIZED_KEYS.get(key, {})
+    for language, prefix in _INTERPHONE_ENTRANCES[entrance].items():
+        if name == defaults.get(language):
+            return f"{prefix} {name}"
+    return name
 
 
 def device_display_name(

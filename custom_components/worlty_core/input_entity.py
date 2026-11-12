@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .entity import WorltyEntity
 from .input import InputCapability, input_capabilities, input_capability
 from .model import WorltyModelChange, provider_entity_unique_id
+from .naming import interphone_time_name
 from .runtime import WorltyRuntime
 
 
@@ -72,6 +73,8 @@ class WorltyInputEntity(WorltyEntity):
         field, resource = self.field, self.resource
         if field is None:
             return base or str(self.capability_id)
+        if self.capability_id == 10 and field.platform == "number":
+            base = interphone_time_name(resource.metadata, base)
         label = field.label(self.runtime.hass.config.language)
         if base and len(input_capabilities(resource)) > 1 and base != label:
             return f"{base} · {label}"

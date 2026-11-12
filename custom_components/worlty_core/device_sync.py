@@ -9,7 +9,9 @@ from dataclasses import replace
 from typing import Any
 
 from .display_name import display_names
+from .input import interphone_modes
 from .model import WorltyModel, WorltyModelChange, WorltyResource
+from .naming import INTERPHONE_TIME_KEYS
 from .wdp.generated_external_platform import CAPABILITY_BY_ID
 
 _MAX_RECORDS = 10240
@@ -359,7 +361,13 @@ class DeviceSyncReceiver:
             raise ValueError("Device records exceed local memory capacity")
 
         prepared, change = self._prepare_projection(
-            read, changed, deleted, reset, cap_updates, old_caps
+            read,
+            changed,
+            deleted,
+            reset,
+            cap_updates,
+            old_caps,
+            (set(old_rows["mv"]) - removals["mv"]) | set(updates["mv"]),
         )
         # Do not invoke callbacks, await, or transform data between these commit steps.
         if reset:
@@ -423,7 +431,89 @@ class DeviceSyncReceiver:
         item["enabled"] = row.get("en") is True
         return item
 
-    def _prepare_projection(self, read, changed, deleted, reset, cap_updates, old_caps):
+    @staticmethod
+    def _interphone_time_entrances(read, resource_at, view_ids):
+        """Resolve unambiguous time members through same-device mode anchors."""
+        entrances = {
+            "view.interphone.home": "home",
+            "view.interphone.apartment": "apartment",
+        }
+        contexts = {}
+        for view_id in view_ids:
+            view = read("mv", view_id)
+            if (
+                not isinstance(view, dict)
+                or not isinstance(view.get("nk"), str)
+                or view["nk"] not in entrances
+            ):
+                continue
+            entrance = entrances[view["nk"]]
+            members = view.get("mb")
+            display = view.get("dsp")
+            secondary = display.get("sec") if isinstance(display, dict) else None
+            if (
+                not isinstance(members, list)
+                or not isinstance(secondary, dict)
+                or type(secondary.get("cp")) is not int
+                or secondary["cp"] != 26
+                or not isinstance(secondary.get("eid"), str)
+            ):
+                continue
+            if any(
+                not isinstance(member, dict)
+                or not isinstance(member.get("eid"), str)
+                or not member["eid"]
+                for member in members
+            ):
+                continue
+            member_ids = {
+                member["eid"]
+                for member in members
+                if isinstance(member, dict) and isinstance(member.get("eid"), str)
+            }
+            if len(member_ids) != len(members):
+                continue
+            anchor = resource_at(secondary["eid"])
+            mode_key = f"entity.setting.interphone.{entrance}.mode"
+            if (
+                secondary["eid"] not in member_ids
+                or anchor is None
+                or anchor.metadata.get("name_key") != mode_key
+                or not interphone_modes(anchor)
+                or not anchor.device_id
+                or read("md", anchor.device_id) is None
+            ):
+                continue
+            members = [resource_at(ident) for ident in member_ids]
+            if any(
+                resource is not None
+                and resource.metadata.get("name_key")
+                in {
+                    "entity.setting.interphone.home.mode",
+                    "entity.setting.interphone.apartment.mode",
+                }
+                and resource.metadata["name_key"] != mode_key
+                for resource in members
+            ):
+                continue
+            for resource in members:
+                if (
+                    resource is not None
+                    and resource.device_id == anchor.device_id
+                    and resource.entity_type == 7
+                    and resource.entity_class == 0
+                    and resource.metadata.get("name_key") in INTERPHONE_TIME_KEYS
+                ):
+                    contexts.setdefault(resource.entity_id, set()).add(entrance)
+        return {
+            ident: next(iter(values))
+            for ident, values in contexts.items()
+            if len(values) == 1
+        }
+
+    def _prepare_projection(
+        self, read, changed, deleted, reset, cap_updates, old_caps, view_ids
+    ):
         """Prepare model changes before committing a complete transfer."""
         names = ("entities", "devices", "device_availability")
         prepared = {name: ({}, set()) for name in names}
@@ -521,6 +611,26 @@ class DeviceSyncReceiver:
         new_ids = (set() if reset else set(old_entities)) - prepared["entities"][
             1
         ] | set(prepared["entities"][0])
+
+        def resource_at(ident):
+            """Read the final resource projection without mutating its predecessor."""
+            if ident not in new_ids:
+                return None
+            return prepared["entities"][0].get(ident) or old_entities[ident]
+
+        if reset or any(changed[key] or deleted[key] for key in ("me", "md", "mv")):
+            entrances = self._interphone_time_entrances(read, resource_at, view_ids)
+            for ident in new_ids:
+                resource = resource_at(ident)
+                entrance = entrances.get(ident)
+                if resource.metadata.get("interphone_entrance") == entrance:
+                    continue
+                metadata = dict(resource.metadata)
+                metadata.pop("interphone_entrance", None)
+                if entrance is not None:
+                    metadata["interphone_entrance"] = entrance
+                prepared["entities"][0][ident] = replace(resource, metadata=metadata)
+                affected.add(ident)
         new_projection = {}
         changed_devices = changed["sd"] | deleted["sd"] | changed["md"] | deleted["md"]
         affected = set(affected)
