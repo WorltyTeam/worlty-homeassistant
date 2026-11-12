@@ -125,15 +125,19 @@ class DeviceSyncReceiver:
                     raise ValueError("Device collection must be an array")
                 if page["pc"][key] != len(upserts) + len(removed):
                     raise ValueError("Device page collection count mismatch")
-                seen = set(transfer["rows"][key]) | set(transfer["removed"][key])
                 for rows, target in ((upserts, "rows"), (removed, "removed")):
                     for row in rows:
                         self._row_shape(row)
-                        if row["id"] in seen:
+                        if (
+                            row["id"] in transfer["rows"][key]
+                            or row["id"] in transfer["removed"][key]
+                        ):
                             raise ValueError("Device transfer repeated a collection ID")
-                        seen.add(row["id"])
                         transfer[target][key][row["id"]] = copy.deepcopy(row)
-                if len(seen) > page["sc"][key]:
+                if (
+                    len(transfer["rows"][key]) + len(transfer["removed"][key])
+                    > page["sc"][key]
+                ):
                     raise ValueError("Device transfer exceeds declared membership")
             if not page["fin"]:
                 cursor = page.get("nc")

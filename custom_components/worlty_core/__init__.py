@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HassJob, HomeAssistant
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
@@ -17,6 +18,7 @@ from homeassistant.helpers import device_registry as dr
 from .const import (
     CONF_DEVICE_ID,
     CONF_PROTOCOL,
+    CONF_TLS_HOSTNAME,
     DOMAIN,
     PLATFORMS,
     PROTOCOL_V1,
@@ -51,6 +53,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.register_runtime(runtime)
     setup_complete = False
     forwarding = False
+    address = tuple(
+        entry.data.get(key) for key in (CONF_HOST, CONF_PORT, CONF_TLS_HOSTNAME)
+    )
     try:
         await runtime.async_start()
         pad_id = str(entry.data[CONF_DEVICE_ID])
@@ -97,6 +102,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     entry.async_on_unload(hass.async_add_shutdown_job(HassJob(runtime.async_stop)))
+    if address != tuple(
+        entry.data.get(key) for key in (CONF_HOST, CONF_PORT, CONF_TLS_HOSTNAME)
+    ):
+        # The regular update listener was not present while startup awaited I/O.
+        # HA's reload task waits for this setup to release the entry lock.
+        hass.config_entries.async_schedule_reload(entry.entry_id)
     return True
 
 

@@ -9,6 +9,7 @@ import re
 import secrets
 from collections.abc import Callable, Coroutine
 from contextlib import suppress
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -44,7 +45,7 @@ from .errors import (
     WorltyRequestError,
 )
 from .identity import WorltyClientIdentity, async_get_client_identity
-from .input import input_capabilities
+from .input import input_capabilities, interphone_modes
 from .model import WorltyModel, WorltyModelChange, WorltyResource, projected_entity_ids
 from .naming import device_display_name
 from .protocol import MessageHandler, WorltyLocalClient
@@ -87,7 +88,12 @@ class WorltyRuntime:
         self._device_query_rid: str | None = None
         self._device_resync_used = False
         self._device_sync_ready = False
+        self._device_sync_completed = False
         self._device_resync_task: asyncio.Task[Any] | None = None
+        self._device_reconnect = asyncio.Event()
+        self._device_transfer_timeout: asyncio.TimerHandle | None = None
+        self._device_transfer_token: object | None = None
+        self._device_subscription_error: WorltyAuthenticationError | None = None
         self._last_connection_error: dict[str, Any] | None = None
         self._last_connection_error_stage: str | None = None
         self._last_connection_error_at: str | None = None
@@ -235,6 +241,7 @@ class WorltyRuntime:
     async def async_stop(self) -> None:
         """Stop reconnect tasks, listeners, and the local session."""
         self._stop.set()
+        self._cancel_device_transfer_timeout()
         if self._first_connection is not None and not self._first_connection.done():
             self._first_connection.cancel()
         task = self._connection_task
@@ -347,6 +354,31 @@ class WorltyRuntime:
                 resource_id, {key: wire_value}, require_readback=field.readable
             )
 
+    async def async_set_interphone_mode(
+        self, resource_id: str, mode: int, enabled: bool
+    ) -> None:
+        """Select a supported mode or atomically clear only that selection."""
+        self._require_scope("control")
+        resource = self.model.entities.get(resource_id)
+        if (
+            not self.connected
+            or resource is None
+            or not self.model.resource_available(resource)
+        ):
+            raise WorltyRequestError("resource_unavailable", resource_id)
+        if (
+            type(mode) is not int
+            or mode not in interphone_modes(resource)
+            or type(enabled) is not bool
+        ):
+            raise WorltyRequestError("invalid_control", "Unsupported interphone mode")
+        await self._async_confirm_control(
+            resource_id,
+            {"26": mode},
+            contract="PadDeviceControl" if enabled else "PadDeviceClearMatch",
+            interphone_mode=mode,
+        )
+
     async def _async_confirm_control(
         self,
         resource_id: str,
@@ -354,10 +386,34 @@ class WorltyRuntime:
         tx: dict[str, str] | None = None,
         *,
         require_readback: bool = True,
+        contract: str = "PadDeviceControl",
+        interphone_mode: int | None = None,
     ) -> None:
         """Confirm accepted batches, requiring readback only for readable fields."""
         item_rid = f"ha-item-{secrets.token_hex(12)}"
         epoch = self._device_sync.epoch
+        admitted_modes = (
+            interphone_modes(self.model.entities.get(resource_id))
+            if interphone_mode is not None
+            else ()
+        )
+
+        def interphone_basis():
+            """Read the descriptor and parent source bound to this mode request."""
+            resource = self.model.entities.get(resource_id)
+            if resource is None:
+                return None
+            return (
+                resource.entity_type,
+                resource.entity_class,
+                resource.device_id,
+                resource.overrides.get("26"),
+                self.model.devices.get(resource.device_id, {}).get("source"),
+            )
+
+        admitted_basis = (
+            deepcopy(interphone_basis()) if interphone_mode is not None else None
+        )
         item = {"id": resource_id, "rid": item_rid}
         if cp:
             item["cp"] = cp
@@ -395,8 +451,12 @@ class WorltyRuntime:
             return result.get("rsn") != "accepted"
 
         response = await self.async_platform_request(
-            contract="PadDeviceControl",
-            payload={"op": 131075, "it": [item]},
+            contract=contract,
+            payload=(
+                {"it": [item]}
+                if contract == "PadDeviceClearMatch"
+                else {"op": 131075, "it": [item]}
+            ),
             expected_contracts=frozenset({"PadDeviceControlResult"}),
             on_update=on_update,
         )
@@ -438,6 +498,27 @@ class WorltyRuntime:
         # The PAD result confirms physical action; current POWER is display state.
         expected_cp = cp if require_readback and not call else {}
         expected_tx = (tx or {}) if require_readback else {}
+        if interphone_mode is not None:
+            # A no-op must describe another supported selection, including default.
+            # The device compares at execution time; never replace it with a zero write.
+            value = (
+                row.get("st", {}).get("26") if isinstance(row.get("st"), dict) else None
+            )
+            if (
+                interphone_basis() != admitted_basis
+                or interphone_modes(resource) != admitted_modes
+                or interphone_mode not in admitted_modes
+                or type(value) is not int
+                or value not in (0, *admitted_modes)
+                or (
+                    contract == "PadDeviceClearMatch"
+                    and reason == "confirmed_noop"
+                    and value == interphone_mode
+                )
+            ):
+                raise WorltyRequestError("control_result_mismatch", item_rid)
+            if contract == "PadDeviceClearMatch":
+                expected_cp = {"26": 0} if reason == "confirmed" else {}
         if (
             data.get("ep") != self._device_sync.epoch
             or row.get("id") != resource_id
@@ -472,6 +553,8 @@ class WorltyRuntime:
         delay = 1
         while not self._stop.is_set():
             stage = "tls_wss"
+            self._device_sync_completed = False
+            wait_tasks: tuple[asyncio.Task[Any], ...] = ()
             try:
                 expected_pin = str(self.entry.data[CONF_TLS_SPKI_SHA256])
                 self._client.set_expected_pin(expected_pin)
@@ -492,13 +575,28 @@ class WorltyRuntime:
                     and not self._first_connection.done()
                 ):
                     self._first_connection.set_result(None)
-                delay = 1
                 stage = "stream"
-                await self._client.async_wait_closed()
-                if not self._stop.is_set():
-                    self._record_connection_failure(
-                        stage, WorltyConnectionError("Local channel closed")
+                closed = asyncio.create_task(self._client.async_wait_closed())
+                wait_tasks = (closed,)
+                while not self._stop.is_set():
+                    reconnect = asyncio.create_task(self._device_reconnect.wait())
+                    wait_tasks = (closed, reconnect)
+                    done, _pending = await asyncio.wait(
+                        wait_tasks, return_when=asyncio.FIRST_COMPLETED
                     )
+                    if self._device_subscription_error is not None:
+                        raise self._device_subscription_error
+                    if closed in done:
+                        await closed
+                        if not self._stop.is_set():
+                            self._record_connection_failure(
+                                stage, WorltyConnectionError("Local channel closed")
+                            )
+                        break
+                    if self._device_reconnect.is_set():
+                        break
+                    # A complete late baseline can clear a queued recovery signal.
+                    # Keep waiting on the same reader in that case.
             except asyncio.CancelledError:
                 raise
             except WorltyAuthenticationError as err:
@@ -543,6 +641,11 @@ class WorltyRuntime:
                     "허브 연결이 중단됐습니다 (%s): %s", stage, type(err).__name__
                 )
             finally:
+                self._cancel_device_transfer_timeout()
+                for waiter in wait_tasks:
+                    waiter.cancel()
+                if wait_tasks:
+                    await asyncio.gather(*wait_tasks, return_exceptions=True)
                 self._device_sync.abort()
                 self._device_subscription_rid = None
                 self._device_query_rid = None
@@ -555,6 +658,8 @@ class WorltyRuntime:
                 self._set_connected(False)
                 if self._client is not None:
                     await self._client.async_disconnect()
+            if self._device_sync_completed:
+                delay = 1
             if not self._stop.is_set():
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30)
@@ -565,9 +670,14 @@ class WorltyRuntime:
         client = self._client
         if client is None or not client.connected:
             raise WorltyConnectionError("PAD is not connected")
+        self._cancel_device_transfer_timeout()
         self._device_sync.abort()
         self._device_sync_ready = False
+        self._device_sync_completed = False
+        self._set_connected(False)
         self._device_resync_used = False
+        self._device_reconnect = asyncio.Event()
+        self._device_subscription_error = None
         self._device_subscription_rid = f"ha-sync-{secrets.token_hex(12)}"
         subscribed = False
         try:
@@ -582,7 +692,7 @@ class WorltyRuntime:
                 self._device_subscription_rid = None
 
     async def _async_device_resync(self) -> None:
-        """Request one bounded resync while retaining the authenticated channel."""
+        """Try one full query, then let the connection owner reconnect on failure."""
         client = self._client
         if (
             self._device_resync_used
@@ -591,20 +701,80 @@ class WorltyRuntime:
             or self._stop.is_set()
         ):
             return
+        subscription_rid = self._device_subscription_rid
+        reconnect = self._device_reconnect
+        self._cancel_device_transfer_timeout()
         self._device_resync_used = True
+        self._device_sync_ready = False
+        self._set_connected(False)
         self._device_sync.abort()
-        self._device_query_rid = f"ha-resync-{secrets.token_hex(12)}"
+        query_rid = self._device_query_rid = f"ha-resync-{secrets.token_hex(12)}"
         try:
-            await client.async_query_device(self._device_query_rid)
-        except (WorltyRequestError, WorltyConnectionError) as err:
-            self._record_connection_failure("device_sync", err)
-            _LOGGER.warning(
-                "Device resync paused; authenticated channel retained: %s",
-                type(err).__name__,
-            )
+            try:
+                await client.async_query_device(query_rid)
+                if not self._device_sync_ready:
+                    raise WorltyRequestError("invalid_device_transfer", query_rid)
+            except (WorltyRequestError, WorltyConnectionError) as err:
+                if (
+                    self._client is client
+                    and self._device_subscription_rid == subscription_rid
+                    and self._device_reconnect is reconnect
+                    and not self._device_sync_ready
+                    and not self._stop.is_set()
+                ):
+                    self._record_connection_failure("device_sync", err)
+                    _LOGGER.warning(
+                        "Device resync failed; reconnecting authenticated channel: %s",
+                        type(err).__name__,
+                    )
+                    # Never close or await the reader from its receive callback.
+                    # The connection loop owns teardown and its existing backoff.
+                    reconnect.set()
         finally:
-            self._device_query_rid = None
-            self._device_sync.abort()
+            if (
+                self._client is client
+                and self._device_subscription_rid == subscription_rid
+                and self._device_reconnect is reconnect
+                and self._device_query_rid == query_rid
+            ):
+                self._device_query_rid = None
+                self._device_sync.abort()
+
+    def _cancel_device_transfer_timeout(self) -> None:
+        """Release the deadline owned by an automatic subscription transfer."""
+        if self._device_transfer_timeout is not None:
+            self._device_transfer_timeout.cancel()
+            self._device_transfer_timeout = None
+        self._device_transfer_token = None
+
+    def _expire_device_transfer(
+        self,
+        client: WorltyLocalClient | None,
+        subscription_rid: str | None,
+        reconnect: asyncio.Event,
+        token: object,
+    ) -> None:
+        """Recover one unfinished automatic transfer in its original session."""
+        if (
+            self._device_transfer_token is not token
+            or self._client is not client
+            or self._device_subscription_rid != subscription_rid
+            or self._device_reconnect is not reconnect
+            or self._device_query_rid is not None
+            or self._stop.is_set()
+        ):
+            return
+        self._cancel_device_transfer_timeout()
+        self._device_sync.abort()
+        self._device_sync_ready = False
+        self._set_connected(False)
+        self._record_connection_failure("device_sync", WorltyRequestError("timeout"))
+        if self._device_resync_used:
+            reconnect.set()
+        elif self._device_resync_task is None or self._device_resync_task.done():
+            self._device_resync_task = self._create_owned_task(
+                self._async_device_resync(), f"{DOMAIN}-device-resync"
+            )
 
     async def _async_handle_message(self, message: dict[str, Any]) -> bool | None:
         """Apply validated Device updates and track subscription errors."""
@@ -629,6 +799,25 @@ class WorltyRuntime:
                         "허브의 상태 동기화 중 오류가 발생했습니다 (코드: %s)",
                         self._last_connection_error["code"],
                     )
+                code = message.get("code")
+                retryable = message.get("retryable")
+                if self._device_sync_completed and (
+                    code == "not_authorized" or retryable is True
+                ):
+                    self._cancel_device_transfer_timeout()
+                    self._device_sync.abort()
+                    self._device_sync_ready = False
+                    self._set_connected(False)
+                    # The rejected observation cannot be restored by a late full.
+                    self._device_subscription_rid = None
+                    self._device_query_rid = None
+                    if self._device_resync_task is not None:
+                        self._device_resync_task.cancel()
+                    if code == "not_authorized" and retryable is False:
+                        self._device_subscription_error = WorltyAuthenticationError(
+                            "Device observation authorization was rejected"
+                        )
+                    self._device_reconnect.set()
             return None
         if message.get("t") != "platform_update":
             return None
@@ -636,12 +825,21 @@ class WorltyRuntime:
             expected = self._device_query_rid or self._device_subscription_rid
             if message.get("rid") != expected:
                 return None
+            was_ready = self._device_sync_ready
             try:
+                if not was_ready and (
+                    not isinstance(message["payload"], dict)
+                    or message["payload"].get("sm") != 1
+                ):
+                    raise ValueError("Device epoch requires a full baseline")
                 change = self._device_sync.accept(message["payload"])
             except (ValueError, TypeError, KeyError) as err:
+                self._cancel_device_transfer_timeout()
+                self._device_sync_ready = False
+                self._set_connected(False)
                 self._record_connection_failure("device_sync", err)
                 if (
-                    self._device_sync_ready
+                    was_ready
                     and not self._device_resync_used
                     and (
                         self._device_resync_task is None
@@ -653,17 +851,37 @@ class WorltyRuntime:
                     )
                 raise
             if change is not None:
-                self._device_sync_ready = True
+                self._cancel_device_transfer_timeout()
+                if message["payload"]["sm"] == 1:
+                    self._device_sync_ready = True
+                    self._device_sync_completed = True
+                    self._device_resync_used = False
+                    self._device_reconnect.clear()
                 await self._async_publish_device_change(
                     change, full=message["payload"]["sm"] == 1
                 )
                 if (
-                    not self._stop.is_set()
+                    self._device_sync_ready
+                    and not self._stop.is_set()
                     and self._client is not None
                     and self._client.connected
                 ):
                     self._set_connected(True)
                 return True
+            if (
+                was_ready
+                and self._device_query_rid is None
+                and self._device_transfer_timeout is None
+            ):
+                token = self._device_transfer_token = object()
+                self._device_transfer_timeout = asyncio.get_running_loop().call_later(
+                    30.0,
+                    self._expire_device_transfer,
+                    self._client,
+                    self._device_subscription_rid,
+                    self._device_reconnect,
+                    token,
+                )
             return False
         if message.get("contract") == "PadDeviceControlResult":
             result = message.get("payload")
@@ -894,10 +1112,17 @@ class WorltyRuntime:
             try:
                 if str(UUID(resource_id)) != resource_id:
                     continue
+                raw_capability, mode_separator, raw_mode = raw_capability.partition(
+                    ":mode:"
+                )
                 capability_id = int(raw_capability) if separator else None
                 if separator and (
                     str(capability_id) != raw_capability
                     or not 0 < capability_id <= 65535
+                ):
+                    continue
+                if mode_separator and (
+                    capability_id != 26 or raw_mode not in {"1", "2", "3"}
                 ):
                     continue
             except ValueError:

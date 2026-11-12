@@ -17,24 +17,28 @@ from .entity import WorltyEntity, setup_entry_platform
 class WorltyLight(WorltyEntity, LightEntity):
     """Hub light with percentage or device-specific brightness levels."""
 
-    def _level_limits(self) -> tuple[int, int] | None:
+    def _level_limits(self) -> tuple[int, int, int] | None:
         """Return declared brightness bounds and step information."""
         resource = self.resource
         if resource is None or 31 not in resource.capabilities:
             return None
         descriptor = resource.overrides.get("31", {})
         minimum, maximum = descriptor.get("mn", 0), descriptor.get("mx")
+        step = descriptor.get("st", 1)
         if any(
             isinstance(value, bool)
             or not isinstance(value, (int, float))
             or not math.isfinite(value)
             or int(value) != value
-            for value in (minimum, maximum)
+            for value in (minimum, maximum, step)
         ):
             return None
-        if minimum < 0 or maximum < 1 or minimum > maximum:
+        if minimum < 0 or maximum < 1 or minimum > maximum or step <= 0:
             return None
-        return int(minimum), int(maximum)
+        minimum, maximum, step = int(minimum), int(maximum), int(step)
+        if minimum == 0 and step > maximum:
+            return None
+        return minimum, maximum, step
 
     @property
     def is_on(self) -> bool | None:
@@ -101,9 +105,17 @@ class WorltyLight(WorltyEntity, LightEntity):
                 if brightness == 0:
                     state["v"] = False
                 else:
-                    minimum, maximum = limits
-                    level = round(brightness * maximum / 255)
-                    state["br_level"] = max(minimum, 1, level)
+                    minimum, maximum, step = limits
+                    # Snap to the descriptor's minimum-anchored integer grid.
+                    denominator = 255 * step
+                    index = (
+                        brightness * maximum - minimum * 255 + denominator // 2
+                    ) // denominator
+                    index = max(
+                        1 if minimum == 0 else 0,
+                        min((maximum - minimum) // step, index),
+                    )
+                    state["br_level"] = minimum + index * step
         await self.runtime.async_set_state(self.resource_id, state)
 
     async def async_turn_off(self, **kwargs: Any) -> None:

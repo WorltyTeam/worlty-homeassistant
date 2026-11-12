@@ -4,8 +4,10 @@ import asyncio
 import datetime
 import json
 import random
+import re
 import time
 from collections import defaultdict
+from contextlib import suppress
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntityDescription
@@ -170,6 +172,17 @@ class WorltyLocal:
         self._received_device_data = False
         self._received_device_data_count = 0
         self._session_generation = 0
+        self._connection_issue_counts: dict[str, int] = {}
+        self._last_connection_issue: dict[str, Any] | None = None
+        self._last_issue_generation: int | None = None
+        self._last_device_received_monotonic: float | None = None
+        self._reconnect_attempts = 0
+        self._reconnect_successes = 0
+        self._authentication_rejections = 0
+        self._last_reconnected_at: str | None = None
+        self._health_probe_attempts = 0
+        self._health_probe_responses = 0
+        self._last_health_probe: dict[str, Any] | None = None
         self._timings: dict[str, float] = {}
         self._queue: list[dict[str, Any]] = []
         self._message_tasks: set[asyncio.Task] = set()
@@ -180,7 +193,8 @@ class WorltyLocal:
         self._entities: dict[Platform, dict[str, dict[str, Any]]] = defaultdict(dict)
         self.worlty_pad: WorltyBaseDevice | None = None
         self.worlty_entity: dict[str, WorltyBaseEntity] = {}
-        self._pending_health: dict[int, object] = {}
+        self._pending_health: dict[int, dict[str, Any]] = {}
+        self._pending_gets: dict[int, dict[str, Any]] = {}
         self._device_lock = asyncio.Lock()
         LOGGER.debug("클래식 패드 연결을 준비합니다")
 
@@ -188,6 +202,54 @@ class WorltyLocal:
         """Increase the upper bound of the random delay with each retry."""
         expo = min(BACKOFF_CAP, BACKOFF_BASE * (2 ** min(attempt, 5)))
         return random.uniform(0, expo)
+
+    def _diagnostic_entry_id(self) -> str:
+        """Identify the HA entry without exposing peer identity or credentials."""
+        if self._entry is not None:
+            entry_id = self._entry.entry_id
+            if isinstance(entry_id, str) and re.fullmatch(
+                r"[A-Za-z0-9_-]{1,128}", entry_id
+            ):
+                return entry_id
+        return "unregistered"
+
+    @staticmethod
+    def _diagnostic_timestamp() -> str | None:
+        """Return an optional UTC timestamp without affecting transport recovery."""
+        with suppress(OSError, OverflowError, ValueError):
+            return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+        return None
+
+    def _record_connection_issue(
+        self, reason: str, *, error: Exception | None = None
+    ) -> None:
+        """Record the first cause per session instead of secondary close effects."""
+        if self._disconnect or self._last_issue_generation == self._session_generation:
+            return
+        self._last_issue_generation = self._session_generation
+        self._connection_issue_counts[reason] = (
+            self._connection_issue_counts.get(reason, 0) + 1
+        )
+        event = {
+            "reason": reason,
+            "at": self._diagnostic_timestamp(),
+            "session_generation": self._session_generation,
+            "last_received_age_seconds": (
+                max(0.0, time.monotonic() - self._last_device_received_monotonic)
+                if self._last_device_received_monotonic is not None
+                else None
+            ),
+        }
+        if error is not None:
+            event["error_type"] = type(error).__name__[:64]
+            if isinstance(error, OSError) and type(error.errno) is int:
+                event["errno"] = error.errno
+        self._last_connection_issue = event
+        LOGGER.warning(
+            "클래식 패드 %s 연결이 중단됐습니다 (사유: %s)",
+            self._diagnostic_entry_id(),
+            reason,
+        )
 
     def _compute_auth_backoff(self, attempt: int) -> float:
         """Use longer retry delays for repeated authentication rejections."""
@@ -203,14 +265,18 @@ class WorltyLocal:
             return None
         return self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
 
-    def _schedule_reconnect(self, *, force: bool = False) -> asyncio.Task | None:
+    def _schedule_reconnect(
+        self, *, force: bool = False, health_guard: tuple[int, int, str] | None = None
+    ) -> asyncio.Task | None:
         """Schedule a single shared reconnect task."""
         if self._disconnect or self.hass.is_stopping or self._entry is None:
             return None
 
         if self._reconnect_task is None or self._reconnect_task.done():
             self._reconnect_task = self._entry.async_create_background_task(
-                self.hass, self._run_reconnect(force=force), "Worlty classic reconnect"
+                self.hass,
+                self._run_reconnect(force=force, health_guard=health_guard),
+                "Worlty classic reconnect",
             )
         return self._reconnect_task
 
@@ -259,6 +325,9 @@ class WorltyLocal:
     async def terminate(self) -> None:
         """Close the streams and wait for socket cleanup within a timeout."""
         self._connected = False
+        self._queue.clear()
+        self._pending_health.clear()
+        self._pending_gets.clear()
         self._set_device_available(False)
         writer, self._publish = self._publish, None
         self._subscribe = None
@@ -342,7 +411,10 @@ class WorltyLocal:
                         "클래식 패드의 기기 식별 정보가 변경되었습니다"
                     )
                 self._received_device_data = False
+                self._queue.clear()
                 self._session_generation += 1
+                self._pending_health.clear()
+                self._pending_gets.clear()
                 self._health = datetime.datetime.now()
                 if self._entry is None:
                     self._entry = entry
@@ -372,6 +444,7 @@ class WorltyLocal:
                 authenticated = True
                 return True, None
         except WorltyV1AuthenticationError:
+            self._authentication_rejections += 1
             return False, "invalid_access_token"
         except (TimeoutError, WorltyV1ConnectionError, OSError):
             return False, "cannot_connect"
@@ -379,7 +452,9 @@ class WorltyLocal:
             if not authenticated:
                 await self.terminate()
 
-    async def _run_reconnect(self, *, force: bool = False) -> bool:
+    async def _run_reconnect(
+        self, *, force: bool = False, health_guard: tuple[int, int, str] | None = None
+    ) -> bool:
         """Reconnect and restart runtime tasks without creating duplicates."""
         current_task = asyncio.current_task()
         try:
@@ -392,6 +467,23 @@ class WorltyLocal:
                 entry_data = self._entry_data()
                 if entry_data is None:
                     return False
+
+                # Health recovery is provisional until the owner starts teardown.
+                # No await separates this receipt check from listener cancellation.
+                if health_guard is not None:
+                    generation, received_count, reason = health_guard
+                    if generation != self._session_generation:
+                        return True
+                    if (
+                        self._received_device_data_count > received_count
+                        and self._connected
+                        and self._publish is not None
+                        and not self._publish.is_closing()
+                        and self._subscribe is not None
+                        and not self._subscribe.at_eof()
+                    ):
+                        return True
+                    self._record_connection_issue(reason)
 
                 listener_task = entry_data.get("task")
                 if (
@@ -409,6 +501,7 @@ class WorltyLocal:
                 auth_attempt = 0
                 auth = False
                 while not auth and not self._disconnect:
+                    self._reconnect_attempts += 1
                     auth, error = await self.auth(self._entry)
                     if auth:
                         break
@@ -418,7 +511,8 @@ class WorltyLocal:
                         delay = self._compute_auth_backoff(auth_attempt)
                         auth_attempt += 1
                         LOGGER.warning(
-                            "Authentication rejected; retry in %.2fs",
+                            "클래식 패드 %s 인증이 거절됐습니다 (%.2f초 후 재시도)",
+                            self._diagnostic_entry_id(),
                             delay,
                         )
                     else:
@@ -429,6 +523,9 @@ class WorltyLocal:
 
                 if not auth or self._disconnect:
                     return False
+
+                self._reconnect_successes += 1
+                self._last_reconnected_at = self._diagnostic_timestamp()
 
                 self._set_device_available(True)
 
@@ -502,6 +599,8 @@ class WorltyLocal:
 
     async def publish(self, payload) -> bool:
         """Send JSON over TCP and schedule reconnection after a transport failure."""
+        writer = self._publish
+        generation = self._session_generation
         try:
             message = json.dumps(payload)
         except (TypeError, ValueError):
@@ -522,20 +621,34 @@ class WorltyLocal:
                 self._schedule_reconnect()
                 return False
 
-            if not self._publish:
+            if (
+                writer is None
+                or writer is not self._publish
+                or generation != self._session_generation
+            ):
                 LOGGER.debug("Publish stream is not initialized")
                 return False
 
             LOGGER.debug("클래식 패드에 메시지를 보냅니다")
-            self._publish.write(message.encode())
-            await asyncio.wait_for(self._publish.drain(), timeout=5)
-            return True
-        except TimeoutError:
+            writer.write(message.encode())
+            await asyncio.wait_for(writer.drain(), timeout=5)
+            return (
+                generation == self._session_generation
+                and writer is self._publish
+                and self._connected
+            )
+        except TimeoutError as err:
             LOGGER.debug("TCP publish timed out")
-        except (OSError, asyncio.IncompleteReadError):
+            reason = "publish_timeout"
+            failure = err
+        except (OSError, asyncio.IncompleteReadError) as err:
             LOGGER.debug("TCP publish connection failed")
-        await self.terminate()
-        self._schedule_reconnect()
+            reason = "publish_socket_error"
+            failure = err
+        if generation == self._session_generation and writer is self._publish:
+            self._record_connection_issue(reason, error=failure)
+            await self.terminate()
+            self._schedule_reconnect()
         return False
 
     async def subscribe(self, timeout: float = None) -> dict[str, Any]:
@@ -543,26 +656,38 @@ class WorltyLocal:
         try:
             line = await asyncio.wait_for(self._subscribe.readline(), timeout=timeout)
             if not line:
+                self._record_connection_issue("eof")
                 self._connected = False
                 return {"error": "connection_lost"}
-
-            msg = line.decode("utf-8", errors="replace").strip()
-            if not msg:
-                return {}
-            message = json.loads(msg)
-            if not isinstance(message, dict):
-                return {}
-            return message
-
         except TimeoutError:
             return {"error": "timeout"}
-        except (OSError, asyncio.IncompleteReadError):
+        except asyncio.IncompleteReadError as err:
+            self._record_connection_issue("incomplete_read", error=err)
             self._connected = False
             return {"error": "connection_lost"}
-        except ValueError:
-            LOGGER.debug("Received an invalid or oversized JSON message")
+        except OSError as err:
+            self._record_connection_issue("socket_error", error=err)
             self._connected = False
             return {"error": "connection_lost"}
+        except ValueError as err:
+            self._record_connection_issue("line_limit", error=err)
+            self._connected = False
+            return {"error": "connection_lost"}
+
+        msg = line.decode("utf-8", errors="replace").strip()
+        if not msg:
+            self._record_connection_issue("empty_frame")
+            return {}
+        try:
+            message = json.loads(msg)
+        except ValueError as err:
+            self._record_connection_issue("invalid_json", error=err)
+            self._connected = False
+            return {"error": "connection_lost"}
+        if not isinstance(message, dict):
+            self._record_connection_issue("invalid_frame")
+            return {}
+        return message
 
     async def health_check(self):
         """Probe an idle connection and reconnect if no response arrives."""
@@ -582,16 +707,36 @@ class WorltyLocal:
             LOGGER.debug(
                 "Health idle; probing connection",
             )
+            generation = self._session_generation
+            received_count = self._received_device_data_count
+            previous_probe = self._last_health_probe
             if await self._probe_health():
                 continue
 
-            reconnect_task = self._schedule_reconnect(force=True)
+            probe = self._last_health_probe
+            health_guard = None
+            if (
+                probe is not previous_probe
+                and probe is not None
+                and probe["result"] == "timeout"
+            ):
+                health_guard = (
+                    generation,
+                    received_count,
+                    "health_probe_timeout"
+                    if self._received_device_data
+                    else "initial_data_timeout",
+                )
+            reconnect_task = self._schedule_reconnect(
+                force=True, health_guard=health_guard
+            )
             if reconnect_task is not None:
                 await reconnect_task
 
     async def _probe_health(self) -> bool:
         """Probe an idle connection without competing with the stream reader."""
         if not await self.is_connected():
+            self._record_connection_issue("connection_unavailable")
             return False
 
         generation = self._session_generation
@@ -601,22 +746,48 @@ class WorltyLocal:
         else:
             payload = {"type": "list", "data": {}}
 
+        probe = self._last_health_probe = {
+            "at": self._diagnostic_timestamp(),
+            "session_generation": generation,
+            "kind": payload["type"],
+            "result": "waiting",
+        }
+        self._health_probe_attempts += 1
         previous_count = self._received_device_data_count
-        if not await self.publish(payload):
+        sent = (
+            await self._request_devices([int(pk)], generation)
+            if payload["type"] == "get"
+            else await self.publish(payload)
+        )
+        if not sent:
+            probe["result"] = "publish_failed"
             return self._session_generation != generation
 
         deadline = self.hass.loop.time() + HEALTH_PROBE_TIMEOUT
         while self.hass.loop.time() < deadline:
             # A new authenticated session owns its own initial response deadline.
             if self._session_generation != generation:
+                probe["result"] = "session_changed"
                 return True
             if self._received_device_data_count > previous_count:
+                probe["result"] = "response_received"
+                self._health_probe_responses += 1
                 return True
             await asyncio.sleep(0.1)
-        return self._session_generation != generation
+        if self._session_generation != generation:
+            probe["result"] = "session_changed"
+            return True
+        if self._received_device_data_count > previous_count:
+            probe["result"] = "response_received"
+            self._health_probe_responses += 1
+            return True
+        probe["result"] = "timeout"
+        return False
 
     async def listen_for_message(self):
         """Dispatch received messages and schedule reconnection when needed."""
+        listener_generation = self._session_generation
+        listener_writer = self._publish
         LOGGER.debug(
             "Listen for messages",
         )
@@ -627,12 +798,13 @@ class WorltyLocal:
             )
             await asyncio.sleep(1)
             while self._connected:
+                generation = self._session_generation
                 message = await self.subscribe(3)
+                if generation != self._session_generation:
+                    return
 
                 if message.get("error") == "connection_lost":
-                    LOGGER.warning(
-                        "Socket closed; reconnecting",
-                    )
+                    self._record_connection_issue("receive_error")
                     self._connected = False
                     break
                 elif message.get("type"):
@@ -641,10 +813,15 @@ class WorltyLocal:
                     if self._is_device_data(message):
                         self._received_device_data = True
                         self._received_device_data_count += 1
+                        self._last_device_received_monotonic = received_at
                         self._health = datetime.datetime.now()
                     task = self._entry.async_create_background_task(
                         self.hass,
-                        self.handle_message(message, received_at=received_at),
+                        self.handle_message(
+                            message,
+                            received_at=received_at,
+                            generation=generation,
+                        ),
                         "Worlty classic message",
                     )
                     self._message_tasks.add(task)
@@ -652,6 +829,7 @@ class WorltyLocal:
                 elif message.get("error") == "timeout":
                     continue
                 else:
+                    self._record_connection_issue("invalid_frame")
                     LOGGER.debug(
                         "클래식 패드에서 올바르지 않은 메시지를 받았습니다",
                     )
@@ -670,18 +848,74 @@ class WorltyLocal:
             LOGGER.debug(
                 "Listener finished",
             )
-            self._connected = False
-            await self.terminate()
+            if (
+                listener_generation == self._session_generation
+                and listener_writer is self._publish
+            ):
+                self._connected = False
+                await self.terminate()
 
-            if not self._disconnect:
-                LOGGER.debug(
-                    "Try auth as listener finished",
-                )
-                self._schedule_reconnect()
+                if not self._disconnect:
+                    LOGGER.debug(
+                        "Try auth as listener finished",
+                    )
+                    self._schedule_reconnect()
 
     def is_entity_changed(self, pk, lct) -> bool:
         """Compare the cached change time for a device key with the reported time."""
         return self._health_map.get(pk, 0) != lct
+
+    def _expire_device_requests(self) -> None:
+        """Release expired reads lazily, without retransmission or extra tasks."""
+        now = self.hass.loop.time()
+        for pk, request in tuple(self._pending_gets.items()):
+            if (
+                request["generation"] != self._session_generation
+                or request["deadline"] <= now
+            ) and self._pending_gets.get(pk) is request:
+                self._pending_gets.pop(pk, None)
+
+    async def _request_devices(
+        self,
+        pks: list[int],
+        generation: int,
+        *,
+        revisions: dict[int, int] | None = None,
+    ) -> bool:
+        """Coalesce reads until their own update or a finite lazy expiry."""
+        if self._disconnect or generation != self._session_generation:
+            return False
+        self._expire_device_requests()
+        requests = {}
+        for pk in pks:
+            if pk in self._pending_gets:
+                pending = self._pending_gets[pk]
+                if revisions is not None and pk in revisions:
+                    revision = revisions[pk]
+                    if pending["revision"] != revision:
+                        pending["revision"] = revision
+                        pending["followup"] = True
+                continue
+            request = {
+                "generation": generation,
+                "deadline": self.hass.loop.time() + HEALTH_PROBE_TIMEOUT,
+                "revision": revisions.get(pk) if revisions is not None else None,
+                "followup": False,
+            }
+            requests[pk] = self._pending_gets[pk] = request
+        if not requests:
+            return True
+        sent = False
+        try:
+            sent = await self.publish(
+                {"type": "get", "data": {"devices": list(requests)}}
+            )
+            return sent
+        finally:
+            if not sent:
+                for pk, request in requests.items():
+                    if self._pending_gets.get(pk) is request:
+                        self._pending_gets.pop(pk, None)
 
     def _record_timing(self, name: str, seconds: float) -> None:
         """Keep only the last and maximum duration for each fixed metric."""
@@ -716,9 +950,17 @@ class WorltyLocal:
         return False
 
     async def handle_message(
-        self, message: dict[str, Any], *, received_at: float | None = None
+        self,
+        message: dict[str, Any],
+        *,
+        received_at: float | None = None,
+        generation: int | None = None,
     ) -> None:
         """Update device lists and states or remove entries based on a message."""
+        if generation is None:
+            generation = self._session_generation
+        if self._disconnect or generation != self._session_generation:
+            return
         if received_at is not None:
             self._record_timing("handler_queue_lag", time.monotonic() - received_at)
         if not isinstance(message, dict):
@@ -736,7 +978,11 @@ class WorltyLocal:
             and all(self._valid_device(device) for device in devices)
         ):
             lock_started = time.monotonic()
+            followup = {}
             async with self._device_lock:
+                if generation != self._session_generation or self._disconnect:
+                    return
+                self._expire_device_requests()
                 update_started = time.monotonic()
                 self._record_timing("update_lock_wait", update_started - lock_started)
                 LOGGER.debug(
@@ -757,38 +1003,69 @@ class WorltyLocal:
                     self.update_device(device)
                     if "lct" in device:
                         self._health_map[str(device["pk"])] = device["lct"]
+                    request = self._pending_gets.pop(device["pk"], None)
+                    if (
+                        request is not None
+                        and request["generation"] == generation
+                        and request["followup"]
+                        and self.is_entity_changed(
+                            str(device["pk"]), request["revision"]
+                        )
+                    ):
+                        followup[device["pk"]] = request["revision"]
 
                 if len(devices) > 0:
                     self.set_data("devices", self._entity_map.copy())
                 self._record_timing(
                     "update_handling", time.monotonic() - update_started
                 )
+            if followup:
+                await self._request_devices(
+                    list(followup), generation, revisions=followup
+                )
         elif data_type == "health" and isinstance(devices, dict):
-            changed = {
-                int(pk): lct
-                for pk, lct in devices.items()
-                if isinstance(pk, str)
-                and pk.isdecimal()
-                and int(pk) > 0
-                and self.is_entity_changed(pk, lct)
-                and int(pk) not in self._pending_health
-            }
+            self._expire_device_requests()
+            changed = {}
+            for pk, lct in devices.items():
+                if (
+                    not isinstance(pk, str)
+                    or not pk.isdecimal()
+                    or int(pk) <= 0
+                    or type(lct) is not int
+                    or lct < 0
+                ):
+                    continue
+                key = int(pk)
+                pending = self._pending_gets.get(key)
+                if pending is not None:
+                    if pending["revision"] != lct:
+                        pending["revision"] = lct
+                        pending["followup"] = True
+                    continue
+                pending = self._pending_health.get(key)
+                if pending is not None:
+                    pending["revision"] = lct
+                elif self.is_entity_changed(pk, lct):
+                    request = {"revision": lct}
+                    changed[key] = self._pending_health[key] = request
             if changed:
-                request = object()
-                self._pending_health.update(dict.fromkeys(changed, request))
                 try:
                     await asyncio.sleep(1)
+                    if generation != self._session_generation or self._disconnect:
+                        return
                     # Do not request the same state if a valid update arrived during the delay.
-                    pks = [
-                        pk
-                        for pk, lct in changed.items()
+                    revisions = {
+                        pk: request["revision"]
+                        for pk, request in changed.items()
                         if self._pending_health.get(pk) is request
-                        and self.is_entity_changed(str(pk), lct)
-                    ]
-                    if pks:
-                        await self.publish({"type": "get", "data": {"devices": pks}})
+                        and self.is_entity_changed(str(pk), request["revision"])
+                    }
+                    if revisions:
+                        await self._request_devices(
+                            list(revisions), generation, revisions=revisions
+                        )
                 finally:
-                    for pk in changed:
+                    for pk, request in changed.items():
                         if self._pending_health.get(pk) is request:
                             self._pending_health.pop(pk, None)
         elif data_type in {"device/list", "device/delete"}:
@@ -809,12 +1086,16 @@ class WorltyLocal:
                     for item in self._entity_map.values()
                     if not item.get("fk") and item["pk"] not in present
                 }
-                await self._async_remove_devices(removed)
+                await self._async_remove_devices(removed, generation=generation)
+                if generation != self._session_generation or self._disconnect:
+                    return
                 if devices:
                     await asyncio.sleep(1)
-                    await self.publish({"type": "get", "data": {"devices": devices}})
+                    if generation != self._session_generation or self._disconnect:
+                        return
+                    await self._request_devices(devices, generation)
             else:
-                await self._async_remove_devices(set(devices))
+                await self._async_remove_devices(set(devices), generation=generation)
         else:
             LOGGER.debug("클래식 패드의 처리 대상이 아닌 메시지를 건너뜁니다")
 
@@ -836,11 +1117,15 @@ class WorltyLocal:
             WorltyLocal._valid_device(item, child=True) for item in children
         )
 
-    async def _async_remove_devices(self, pks: set[int]) -> None:
+    async def _async_remove_devices(
+        self, pks: set[int], *, generation: int | None = None
+    ) -> None:
         """Remove device runtime state while preserving HA registries for re-registration."""
         if not pks:
             return
         async with self._device_lock:
+            if generation is not None and generation != self._session_generation:
+                return
             unique_ids = {
                 unique_id
                 for unique_id, item in self._entity_map.items()
@@ -860,9 +1145,12 @@ class WorltyLocal:
                     entities.pop(unique_id, None)
             for entity in entities_to_remove:
                 await entity.async_remove()
+                if generation is not None and generation != self._session_generation:
+                    return
                 self.unregister_entity(entity)
             for pk in pks:
                 self._pending_health.pop(pk, None)
+                self._pending_gets.pop(pk, None)
             for pk in pks:
                 self._health_map.pop(str(pk), None)
             self._queue = [item for item in self._queue if item.get("pk") not in pks]
@@ -965,16 +1253,43 @@ class WorltyLocal:
             "received_device_data_count": self._received_device_data_count,
             **self._timings,
             "owned_tasks": sum(task is not None and not task.done() for task in tasks),
+            "connection": {
+                "entry_id": self._entry.entry_id if self._entry is not None else None,
+                "session_generation": self._session_generation,
+                "reconnect_attempts": self._reconnect_attempts,
+                "authenticated_reconnections": self._reconnect_successes,
+                "authentication_rejections": self._authentication_rejections,
+                "last_reconnected_at": self._last_reconnected_at,
+                "disconnect_count": sum(self._connection_issue_counts.values()),
+                "disconnect_reasons": dict(self._connection_issue_counts),
+                "last_disconnect": (
+                    dict(self._last_connection_issue)
+                    if self._last_connection_issue is not None
+                    else None
+                ),
+                "health_probe_attempts": self._health_probe_attempts,
+                "health_probe_responses": self._health_probe_responses,
+                "last_health_probe": (
+                    dict(self._last_health_probe)
+                    if self._last_health_probe is not None
+                    else None
+                ),
+            },
         }
 
     async def loop(self) -> None:
-        """Batch pending commands and remove only successfully sent commands."""
+        """Send each batch once within its authenticated connection session."""
         current_task = asyncio.current_task()
-        sent = False
-        queued_devices: list[dict[str, Any]] = []
+        generation = self._session_generation
+        writer = self._publish
+        reschedule = False
         try:
             await asyncio.sleep(0.05)
-            queued_devices = list(self._queue)
+            if generation != self._session_generation or writer is not self._publish:
+                reschedule = True
+                return
+            # Detach before sending so new commands cannot replay this batch.
+            queued_devices, self._queue = self._queue, []
             if queued_devices:
                 sent = await self.publish(
                     {
@@ -982,18 +1297,22 @@ class WorltyLocal:
                         "data": {"devices": queued_devices},
                     }
                 )
-                if sent:
-                    sent_by_pk = {device.get("pk"): device for device in queued_devices}
-                    self._queue = [
-                        device
-                        for device in self._queue
-                        if sent_by_pk.get(device.get("pk")) != device
-                    ]
+                if (
+                    not sent
+                    and generation == self._session_generation
+                    and writer is self._publish
+                ):
+                    self._queue.clear()
+            reschedule = True
+        except asyncio.CancelledError:
+            if generation == self._session_generation and writer is self._publish:
+                self._queue.clear()
+            raise
         finally:
             entry_data = self._entry_data()
             if entry_data is not None and entry_data.get("loop") is current_task:
                 entry_data["loop"] = None
-            if sent and self._queue:
+            if reschedule and self._queue:
                 self._schedule_queue_flush()
 
     def queue(self, data) -> None:
@@ -1001,6 +1320,20 @@ class WorltyLocal:
         if self._disconnect or self.hass.is_stopping:
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key="classic_connection_closing"
+            )
+        reconnect_task = self._reconnect_task
+        if (
+            not self._connected
+            or self._publish is None
+            or self._publish.is_closing()
+            or self._subscribe is None
+            or self._subscribe.at_eof()
+            or (reconnect_task is not None and not reconnect_task.done())
+        ):
+            self._queue.clear()
+            self._schedule_reconnect()
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="classic_connection_failed"
             )
         payload = {}
         for queued in self._queue:

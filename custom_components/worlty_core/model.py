@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .input import input_capabilities
+from .input import input_capabilities, interphone_modes
 
 ENTITY_PLATFORM_BY_TYPE = {
     1: "binary_sensor",
@@ -90,9 +90,12 @@ def provider_entity_unique_id(
     pad_id: str,
     resource_id: str,
     capability_id: int | None = None,
+    mode: int | None = None,
 ) -> str:
     """Build an HA registry ID from the immutable hub resource UUID."""
     suffix = "" if capability_id is None else f":cp:{capability_id}"
+    if mode is not None:
+        suffix += f":mode:{mode}"
     return f"{pad_id}:{resource_id}{suffix}"
 
 
@@ -101,7 +104,7 @@ def projected_entity_ids(pad_id: str, resource: WorltyResource) -> dict[str, str
     if not resource.visible or not resource.enabled:
         return {}
     if resource.entity_type == 7:
-        return {
+        projected = {
             provider_entity_unique_id(
                 pad_id=pad_id,
                 resource_id=resource.entity_id,
@@ -109,6 +112,18 @@ def projected_entity_ids(pad_id: str, resource: WorltyResource) -> dict[str, str
             ): field.platform
             for capability_id, field in input_capabilities(resource).items()
         }
+        projected.update(
+            {
+                provider_entity_unique_id(
+                    pad_id=pad_id,
+                    resource_id=resource.entity_id,
+                    capability_id=26,
+                    mode=mode,
+                ): "switch"
+                for mode in interphone_modes(resource)
+            }
+        )
+        return projected
     if resource.platform is None:
         return {}
     return {
@@ -130,10 +145,28 @@ class WorltyModelChange:
     removed_devices: frozenset[str] = frozenset()
     activated: frozenset[str] = frozenset()
     deactivated: frozenset[str] = frozenset()
+    _all_ids_cache: frozenset[str] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        """Share one affected-ID union across listeners for immutable changes."""
+        groups = (
+            self.added,
+            self.updated,
+            self.removed,
+            self.retyped,
+            self.activated,
+            self.deactivated,
+        )
+        if all(type(group) is frozenset for group in groups):
+            object.__setattr__(self, "_all_ids_cache", frozenset().union(*groups))
 
     @property
     def all_ids(self) -> frozenset[str]:
         """Collect all entity IDs affected by this change."""
+        if self._all_ids_cache is not None:
+            return self._all_ids_cache
         return (
             self.added
             | self.updated

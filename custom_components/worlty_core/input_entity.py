@@ -10,7 +10,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .entity import WorltyEntity
-from .input import InputCapability, input_capabilities
+from .input import InputCapability, input_capabilities, input_capability
 from .model import WorltyModelChange, provider_entity_unique_id
 from .runtime import WorltyRuntime
 
@@ -42,7 +42,7 @@ class WorltyInputEntity(WorltyEntity):
         """Find this entity's input field in the current resource."""
         resource = self.resource
         return (
-            input_capabilities(resource).get(self.capability_id)
+            input_capability(resource, self.capability_id)
             if resource is not None
             else None
         )
@@ -50,11 +50,10 @@ class WorltyInputEntity(WorltyEntity):
     @property
     def available(self) -> bool:
         """Determine availability from the connection and resource state."""
-        return (
-            super().available
-            and self.field is not None
-            and self.field.platform == self._input_platform
-        )
+        if not super().available:
+            return False
+        field = self.field
+        return field is not None and field.platform == self._input_platform
 
     @property
     def value(self) -> Any:
@@ -85,8 +84,10 @@ class WorltyInputEntity(WorltyEntity):
             **super().extra_state_attributes,
             "worlty_capability_id": self.capability_id,
         }
-        if self.field is not None and self.field.flags:
-            attributes["worlty_supported_flags"] = list(self.field.flags)
+        field = self.field
+        flags = field.flags if field is not None else ()
+        if flags:
+            attributes["worlty_supported_flags"] = list(flags)
         return attributes
 
     async def async_set_value(self, value: Any) -> None:

@@ -102,7 +102,11 @@ class WorltyFan(WorltyEntity, FanEntity):
         features = FanEntityFeature(0)
         if self._speeds() and resource.overrides.get("15", {}).get("ac", 0) & 2:
             features |= FanEntityFeature.SET_SPEED
-        if self.preset_modes:
+        preset_capability = "14" if 14 in resource.capabilities else "15"
+        if (
+            self.preset_modes
+            and resource.overrides.get(preset_capability, {}).get("ac", 0) & 2
+        ):
             features |= FanEntityFeature.PRESET_MODE
         if resource.overrides.get("1", {}).get("ac", 0) & 2:
             features |= FanEntityFeature.TURN_ON | FanEntityFeature.TURN_OFF

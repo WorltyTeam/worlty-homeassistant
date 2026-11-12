@@ -2,11 +2,18 @@
 
 from homeassistant.components.select import SelectEntity
 
+from .input import interphone_modes
 from .input_entity import WorltyInputEntity, setup_input_platform
 
 
 class WorltyInputSelect(WorltyInputEntity, SelectEntity):
     """Enumeration input exposed as an HA select entity."""
+
+    def __init__(self, runtime, resource_id, capability_id):
+        """Preserve existing selections while preferring switches for new entries."""
+        super().__init__(runtime, resource_id, capability_id)
+        if capability_id == 26 and interphone_modes(self.resource):
+            self._attr_entity_registry_enabled_default = False
 
     @property
     def options(self):

@@ -1,6 +1,7 @@
 """Support classic pad sensors."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from math import isfinite
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -56,10 +57,26 @@ class WorltySensor(WorltyBaseEntity, SensorEntity):
         """Use the common entity state without additional computed attributes."""
 
     @property
-    def native_value(self) -> StateType:
-        """Apply time zones to timestamps and validate numeric sensor values."""
-        if self.worlty_state is None:
+    def native_value(self) -> StateType | date | datetime:
+        """Normalize date, enum, timestamp, and numeric sensor values for HA."""
+        if self.worlty_state is None or self.worlty_state == "-":
             return None
+
+        if self.worlty_class == 10:
+            if isinstance(self.worlty_state, datetime):
+                return None
+            if isinstance(self.worlty_state, date):
+                return self.worlty_state
+            if isinstance(self.worlty_state, str):
+                try:
+                    return date.fromisoformat(self.worlty_state)
+                except ValueError:
+                    pass
+            return None
+
+        if self.worlty_class == 14:
+            # No firmware options list is available; retain HA's default options.
+            return self.worlty_state if isinstance(self.worlty_state, str) else None
 
         tz = timezone(timedelta(hours=9))
         if self.worlty_class == 45:
@@ -67,19 +84,18 @@ class WorltySensor(WorltyBaseEntity, SensorEntity):
                 return None
             try:
                 return datetime.fromtimestamp(int(self.worlty_state), tz)
-            except (ValueError, TypeError, OSError):
+            except (ValueError, TypeError, OSError, OverflowError):
                 return None
 
         try:
             value = float(self.worlty_state)
+            if not isfinite(value):
+                return None
             if self.worlty_name.endswith("_ms"):
                 value /= 1000
             return value
         except (ValueError, TypeError):
             pass
-
-        if self.worlty_state == "-":
-            return None
 
         # HA requires numeric values for several device classes even without units.
         # A device may briefly report text such as "updated" instead of a number.

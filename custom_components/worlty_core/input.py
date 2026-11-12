@@ -300,21 +300,64 @@ class InputCapability:
         return int(value) if vt in (4, 5, 6, 7) else value
 
 
+def _input_capability(
+    capability_id: int, descriptor: dict[str, Any]
+) -> InputCapability | None:
+    """Build one supported field using the same descriptor validation everywhere."""
+    if (
+        type(descriptor.get("vt")) is not int
+        or type(descriptor.get("ac")) is not int
+        or descriptor["ac"] not in (1, 2, 3)
+    ):
+        return None
+    field = InputCapability(capability_id, descriptor)
+    return field if field.platform is not None else None
+
+
+def input_capability(resource: Any, capability_id: int) -> InputCapability | None:
+    """Find one current field without constructing unrelated field objects."""
+    if resource.entity_type != 7:
+        return None
+    for declared_id in resource.capabilities:
+        if declared_id == capability_id:
+            return _input_capability(
+                declared_id, resource.overrides.get(str(declared_id), {})
+            )
+    return None
+
+
 def input_capabilities(resource: Any) -> dict[int, InputCapability]:
     """Expose supported descriptor types and retain unknown raw data."""
     if resource.entity_type != 7:
         return {}
     result = {}
     for capability_id in resource.capabilities:
-        descriptor = resource.overrides.get(str(capability_id), {})
-        if (
-            type(descriptor.get("vt")) is not int
-            or type(descriptor.get("ac")) is not int
-        ):
-            continue
-        if descriptor["ac"] not in (1, 2, 3):
-            continue
-        field = InputCapability(capability_id, descriptor)
-        if field.platform is not None:
+        field = _input_capability(
+            capability_id, resource.overrides.get(str(capability_id), {})
+        )
+        if field is not None:
             result[capability_id] = field
     return result
+
+
+def interphone_modes(resource: Any) -> tuple[int, ...]:
+    """Return explicitly supported interphone modes with a writable default."""
+    if resource is None or resource.entity_type != 7 or resource.entity_class != 7:
+        return ()
+    field = input_capability(resource, 26)
+    if (
+        field is None
+        or field.value_type != 3
+        or field.descriptor.get("ac") != 3
+        or field.descriptor.get("ed") != 33
+    ):
+        return ()
+    values = field.descriptor.get("ev")
+    if (
+        not isinstance(values, list)
+        or any(type(value) is not int or value not in (0, 1, 2, 3) for value in values)
+        or len(values) != len(set(values))
+        or 0 not in values
+    ):
+        return ()
+    return tuple(mode for mode in (1, 2, 3) if mode in values)

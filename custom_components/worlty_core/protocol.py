@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from aiohttp import ClientError, ClientSession, ClientWebSocketResponse, WSMsgType
+from yarl import URL
 
 from .const import (
     AUTH_SCOPES,
@@ -63,11 +64,16 @@ def _device_envelope(frame: Mapping[str, Any], *, incoming: bool, scope: int) ->
     allowed = (
         {"PadDeviceSyncPage", "PadDeviceControlResult"}
         if incoming
-        else {"PadDeviceSyncQuery", "PadDeviceControl"}
+        else {"PadDeviceSyncQuery", "PadDeviceControl", "PadDeviceClearMatch"}
     )
     if contract not in allowed:
         raise DeviceApiValidationError("Device application direction is invalid")
-    required = 2 if contract in {"PadDeviceControl", "PadDeviceControlResult"} else 1
+    required = (
+        2
+        if contract
+        in {"PadDeviceControl", "PadDeviceClearMatch", "PadDeviceControlResult"}
+        else 1
+    )
     if not scope & required:
         raise WorltyAuthenticationError("Device application scope is not granted")
     rid = frame.get("rid")
@@ -141,6 +147,18 @@ def _scopes_from_mask(
     if value != requested_mask:
         raise WorltyAuthenticationError("PAD did not grant approved scopes")
     return requested_scopes
+
+
+def _auth_receipt_identifier(value: Any) -> str:
+    """Reject malformed peer identifiers before constant-time comparison."""
+    if (
+        not isinstance(value, str)
+        or re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", value) is None
+    ):
+        # Invalid peer frames are retryable protocol failures, not proof that
+        # the saved pairing identity or approved credentials must be replaced.
+        raise WorltyConnectionError("PAD auth receipt identifier is invalid")
+    return value
 
 
 def _peer_certificate_der(websocket: ClientWebSocketResponse) -> bytes:
@@ -217,10 +235,24 @@ async def _open_verified(
             raise WorltyAuthenticationError(
                 "registered connection requires identity and pin"
             )
+        if (
+            not isinstance(host, str)
+            or not host.strip()
+            or type(port) is not int
+            or not 1 <= port <= 65535
+        ):
+            raise WorltyConnectionError("PAD connection address is invalid")
+        address = host.strip()
+        if address.startswith("[") and address.endswith("]"):
+            address = address[1:-1]
+        try:
+            url = str(URL.build(scheme="wss", host=address, port=port, path=path))
+        except (TypeError, ValueError):
+            raise WorltyConnectionError("PAD connection address is invalid") from None
         async with asyncio.timeout(5.0):
             tls_context = await asyncio.to_thread(create_worlty_tls_context)
             websocket = await session.ws_connect(
-                f"wss://{host}:{port}{path}",
+                url,
                 protocols=(LOCAL_SUBPROTOCOL,),
                 ssl=tls_context,
                 server_hostname=normalize_tls_hostname(tls_hostname),
@@ -376,10 +408,12 @@ async def async_pair_device(
                 or type(result.get("scope_mask")) is not int
                 or result["scope_mask"] != 3
                 or not hmac.compare_digest(
-                    str(result.get("client_id", "")), identity.client_id
+                    _auth_receipt_identifier(result.get("client_id")),
+                    identity.client_id,
                 )
                 or not hmac.compare_digest(
-                    str(result.get("platform_instance_id", "")), identity.ha_instance_id
+                    _auth_receipt_identifier(result.get("platform_instance_id")),
+                    identity.ha_instance_id,
                 )
             ):
                 raise WorltyAuthenticationError("PAD pairing receipt mismatch")
@@ -558,8 +592,8 @@ class WorltyLocalClient:
                         requested_scopes=self._requested_scopes,
                     )
                     if not hmac.compare_digest(
-                        str(auth_result.get("session_id", "")),
-                        str(challenge["session_id"]),
+                        _auth_receipt_identifier(auth_result.get("session_id")),
+                        challenge["session_id"],
                     ):
                         raise WorltyAuthenticationError("PAD auth session changed")
                     principal = auth_result.get("principal")
@@ -569,11 +603,13 @@ class WorltyLocalClient:
                         or principal.get("platform_id")
                         != EXTERNAL_PLATFORM_ID_HOME_ASSISTANT
                         or not hmac.compare_digest(
-                            str(principal.get("platform_instance_id", "")),
+                            _auth_receipt_identifier(
+                                principal.get("platform_instance_id")
+                            ),
                             self._identity.ha_instance_id,
                         )
                         or not hmac.compare_digest(
-                            str(principal.get("client_id", "")),
+                            _auth_receipt_identifier(principal.get("client_id")),
                             self._identity.client_id,
                         )
                         or principal.get("client_public_key_sha256")
@@ -691,8 +727,14 @@ class WorltyLocalClient:
                 return await future
         except TimeoutError as err:
             raise WorltyRequestError("timeout", request_id) from err
+        except (ClientError, OSError) as err:
+            raise WorltyConnectionError("Worlty Local API transfer failed") from err
         finally:
             self._pending.pop(request_id, None)
+            if not future.done():
+                future.cancel()
+            elif not future.cancelled():
+                future.exception()
 
     async def async_platform_request(
         self,

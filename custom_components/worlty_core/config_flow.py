@@ -66,6 +66,14 @@ _REAUTH_TRUST_KEYS = (
     CONF_PORT,
     CONF_TLS_HOSTNAME,
 )
+_V1_ADDRESS_TRUST_KEYS = (
+    CONF_PROTOCOL,
+    CONF_HOST,
+    CONF_PORT,
+    CONF_ACCESS_TOKEN,
+    CONF_DEVICE_ID,
+    "mac_address",
+)
 
 
 async def _ignore_message(message: dict[str, Any]) -> None:
@@ -151,6 +159,24 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Store the device name shown in the setup flow."""
         self.context["title_placeholders"] = {"name": name}
 
+    def _discovery_snapshot_matches(
+        self,
+        entry: ConfigEntry,
+        original: dict[str, Any],
+        unique_id: str | None,
+        keys: tuple[str, ...],
+    ) -> bool:
+        """Reject a probe result if its entry or trusted endpoint changed."""
+        return (
+            any(
+                candidate is entry
+                for candidate in self.hass.config_entries.async_entries(DOMAIN)
+            )
+            and getattr(entry, "disabled_by", None) is None
+            and getattr(entry, "unique_id", None) == unique_id
+            and all(entry.data.get(key) == original.get(key) for key in keys)
+        )
+
     async def async_step_reconfigure(self, user_input=None):
         """Register an existing device using the same approval and identity checks."""
         entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
@@ -214,9 +240,11 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             tls_hostname = normalize_tls_hostname(discovery_info.hostname)
         except WorltyAuthenticationError:
             return self.async_abort(reason="invalid_discovery")
-        host = str(discovery_info.host).strip()
+        host = (
+            discovery_info.host.strip() if isinstance(discovery_info.host, str) else ""
+        )
         port = discovery_info.port
-        if not host or not isinstance(port, int) or not 1 <= port <= 65535:
+        if not host or type(port) is not int or not 1 <= port <= 65535:
             return self.async_abort(reason="invalid_discovery")
         entries = [
             entry
@@ -231,6 +259,11 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             None,
         )
+        original = dict(known.data) if known is not None else None
+        original_unique_id = getattr(known, "unique_id", None)
+        if known is not None and getattr(known, "disabled_by", None) is not None:
+            await self.async_set_unique_id(known.data[CONF_DEVICE_ID])
+            return self.async_abort(reason="already_configured")
         if (
             known is not None
             and known.data.get(CONF_HOST) == host
@@ -254,6 +287,11 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except (WorltyAuthenticationError, ValueError):
             return self.async_abort(reason="authentication_failed")
         if known is None:
+            entries = [
+                entry
+                for entry in self.hass.config_entries.async_entries(DOMAIN)
+                if entry.data.get(CONF_PROTOCOL, PROTOCOL_V2) == PROTOCOL_V2
+            ]
             known = next(
                 (
                     entry
@@ -264,7 +302,14 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 None,
             )
+            if known is not None:
+                original = dict(known.data)
+                original_unique_id = getattr(known, "unique_id", None)
         if known is not None:
+            if original is None or not self._discovery_snapshot_matches(
+                known, original, original_unique_id, _REAUTH_TRUST_KEYS
+            ):
+                return self.async_abort(reason="already_configured")
             if any(
                 known.data.get(key) != candidate[key]
                 for key in (CONF_DEVICE_ID, CONF_TLS_TARGET_ID, CONF_TLS_SPKI_SHA256)
@@ -296,9 +341,9 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_user()
 
     async def _async_discover_v1(self, info: ZeroconfServiceInfo):
-        """Identify the classic name/id TXT profile without sending a token."""
+        """Discover classic pads and authenticate changed registered addresses."""
         mac = _hardware_id(_txt_value(info.properties, "id"))
-        host = str(info.host).strip()
+        host = info.host.strip() if isinstance(info.host, str) else ""
         if (
             not mac
             or not _txt_value(info.properties, "name").strip()
@@ -309,6 +354,49 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         ):
             return self.async_abort(reason="invalid_discovery")
         await self.async_set_unique_id(f"v1_{mac.lower()}")
+        known = next(
+            (
+                entry
+                for entry in self.hass.config_entries.async_entries(DOMAIN)
+                if entry.data.get(CONF_PROTOCOL) == PROTOCOL_V1
+                and _hardware_id(str(entry.data.get("mac_address", ""))) == mac
+            ),
+            None,
+        )
+        if known is not None:
+            if getattr(known, "disabled_by", None) is not None or (
+                known.data.get(CONF_HOST) == host
+                and known.data.get(CONF_PORT) == info.port
+            ):
+                return self.async_abort(reason="already_configured")
+            original = dict(known.data)
+            original_unique_id = getattr(known, "unique_id", None)
+            token = original.get(CONF_ACCESS_TOKEN)
+            device_id = original.get(CONF_DEVICE_ID)
+            if not isinstance(token, str) or not token.strip() or not device_id:
+                return self.async_abort(reason="authentication_failed")
+            try:
+                candidate = await async_probe_v1_device(
+                    self.hass, host=host, port=info.port, access_token=token
+                )
+            except (WorltyConnectionError, TimeoutError):
+                return self.async_abort(reason="cannot_connect")
+            except WorltyAuthenticationError:
+                return self.async_abort(reason="authentication_failed")
+            if (
+                candidate.get("mac_address") != mac
+                or candidate.get(CONF_DEVICE_ID) != device_id
+            ):
+                return self.async_abort(reason="authentication_failed")
+            if not self._discovery_snapshot_matches(
+                known, original, original_unique_id, _V1_ADDRESS_TRUST_KEYS
+            ):
+                return self.async_abort(reason="already_configured")
+            self.hass.config_entries.async_update_entry(
+                known, data={**known.data, CONF_HOST: host, CONF_PORT: info.port}
+            )
+            self.hass.config_entries.async_schedule_reload(known.entry_id)
+            return self.async_abort(reason="already_configured")
         self._abort_if_unique_id_configured()
         self._protocol = PROTOCOL_V1
         self._discovery = {

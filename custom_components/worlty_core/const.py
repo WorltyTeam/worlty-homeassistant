@@ -7,7 +7,6 @@ from typing import Final
 from .wdp.generated_external_platform import INTEGRATION_CONTRACT_PROFILE
 
 DOMAIN: Final = "worlty_core"
-VERSION: Final = "2.0.0"
 
 CONF_DEVICE_ID: Final = "device_id"
 CONF_PAD_NAME: Final = "pad_name"

@@ -38,7 +38,11 @@ class WorltyCover(WorltyEntity, CoverEntity):
     def supported_features(self) -> CoverEntityFeature:
         """Return the HA features supported by this resource."""
         resource = self.resource
-        if resource is None or 16 not in resource.capabilities:
+        if (
+            resource is None
+            or 16 not in resource.capabilities
+            or not resource.overrides.get("16", {}).get("ac", 0) & 2
+        ):
             return CoverEntityFeature(0)
         return (
             CoverEntityFeature.OPEN
