@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import logging
 import re
+import ssl
+from ipaddress import IPv4Address
 from typing import Any
 
 import voluptuous as vol
+from aiohttp import (
+    ClientConnectionError,
+    ClientConnectorError,
+    ClientSSLError,
+    ServerFingerprintMismatch,
+)
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_HOST, CONF_PORT
@@ -54,6 +63,7 @@ _DISCOVERY_PROFILE = (
     ("pv", "1"),
     ("transport", "wss"),
 )
+_DISCOVERY_IPV4_RESET_DELAYS = (1, 2)
 _REAUTH_TRUST_KEYS = (
     CONF_PROTOCOL,
     CONF_DEVICE_ID,
@@ -106,6 +116,41 @@ def _discovery_name(info: ZeroconfServiceInfo, fallback: str) -> str:
     if not advertised and info.name.lower().endswith(suffix.lower()):
         advertised = info.name[: -len(suffix)]
     return _display_name(advertised, fallback)
+
+
+def _discovery_ipv4_connection_reset(host: str, error: BaseException) -> bool:
+    """Recognize an IPv4 transport reset through the probe's exception chain."""
+    try:
+        IPv4Address(host)
+    except ValueError:
+        return False
+
+    reason: BaseException | None = error
+    transport_error = False
+    reset: bool | None = None
+    seen: set[int] = set()
+    while reason is not None and id(reason) not in seen:
+        seen.add(id(reason))
+        if isinstance(
+            reason,
+            (
+                WorltyAuthenticationError,
+                ClientSSLError,
+                ServerFingerprintMismatch,
+                ssl.SSLError,
+            ),
+        ):
+            return False
+        transport_error |= isinstance(reason, ClientConnectionError)
+        os_error = (
+            reason.os_error if isinstance(reason, ClientConnectorError) else reason
+        )
+        if reset is None and isinstance(os_error, OSError):
+            reset = os_error.errno == errno.ECONNRESET and not isinstance(
+                os_error, TimeoutError
+            )
+        reason = reason.__cause__ or reason.__context__
+    return transport_error and reset is True
 
 
 async def async_probe_v1_device(hass, *, host: str, port: int, access_token: str):
@@ -275,17 +320,27 @@ class WorltyCoreConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="already_configured")
         if known is None and discovery_info.type != "_worlty-pair._tcp.local.":
             return self.async_abort(reason="registration_not_open")
-        try:
-            candidate = await async_probe_device(
-                async_get_clientsession(self.hass),
-                host=host,
-                port=port,
-                tls_hostname=tls_hostname,
-            )
-        except (WorltyConnectionError, TimeoutError):
-            return self.async_abort(reason="cannot_connect")
-        except (WorltyAuthenticationError, ValueError):
-            return self.async_abort(reason="authentication_failed")
+        session = async_get_clientsession(self.hass)
+        for attempt in range(len(_DISCOVERY_IPV4_RESET_DELAYS) + 1):
+            try:
+                candidate = await async_probe_device(
+                    session, host=host, port=port, tls_hostname=tls_hostname
+                )
+            except (WorltyConnectionError, TimeoutError) as error:
+                if attempt == len(
+                    _DISCOVERY_IPV4_RESET_DELAYS
+                ) or not _discovery_ipv4_connection_reset(host, error):
+                    return self.async_abort(reason="cannot_connect")
+                delay = _DISCOVERY_IPV4_RESET_DELAYS[attempt]
+                _LOGGER.debug(
+                    "Retrying Local discovery probe on the same IPv4 after ECONNRESET in %ds",
+                    delay,
+                )
+                await asyncio.sleep(delay)
+            except (WorltyAuthenticationError, ValueError):
+                return self.async_abort(reason="authentication_failed")
+            else:
+                break
         if known is None:
             entries = [
                 entry

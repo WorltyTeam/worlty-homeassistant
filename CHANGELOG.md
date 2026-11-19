@@ -1,5 +1,13 @@
 # 변경 내역
 
+## v2.0.9 · 2026-11-19
+
+월티 허브 자동발견 중 연결이 갑자기 끊기면 같은 주소로 최대 두 번 다시 시도합니다. 첫 재시도는 1초 뒤, 다시 끊기면 2초 뒤에 진행합니다.
+
+업데이트한 뒤에는 Home Assistant를 재시작해 주세요. 기기를 다시 등록할 필요는 없습니다.
+
+[설치·연결 안내](https://github.com/WorltyTeam/worlty-homeassistant#readme) · [버전별 변경 내역](https://github.com/WorltyTeam/worlty-homeassistant/blob/release/2.0.0/CHANGELOG.md)
+
 ## v2.0.8 · 2026-11-12
 
 월티 허브의 인터폰 시간 설정 이름을 현관별로 구분했습니다.
